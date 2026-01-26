@@ -1,0 +1,66 @@
+# Default ignore patterns voor PII-Radar
+# Vergelijkbaar met .gitignore syntax
+
+# Version control
+.git/
+.svn/
+.hg/
+
+# Dependencies
+node_modules/
+vendor/
+target/
+venv/
+__pycache__/
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Binaries (standaard skip, tenzij --scan-binaries flag)
+*.bin
+*.dat
+*.class
+*.pyc
+
+# Media (meestal geen PII)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp4
+*.mp3
+*.wav
+*.avi
+
+# Compressed archives (enable met --extract-archives)
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+
+# Large files (>100MB default limit)
+# Configureerbaar met --max-file-size
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~

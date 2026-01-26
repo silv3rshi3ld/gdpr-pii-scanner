@@ -1,0 +1,80 @@
+[package]
+name = "pii-radar"
+version = "0.3.0"
+edition = "2021"
+authors = ["PII-Radar Contributors"]
+license = "MIT OR Apache-2.0"
+description = "High-performance PII scanner voor lokale bestanden - detecteert BSN, IBAN, creditcards, en meer"
+repository = "https://github.com/yourusername/pii-radar"
+readme = "README.md"
+keywords = ["pii", "security", "privacy", "scanner", "gdpr"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# CLI & Argument Parsing
+clap = { version = "4.5", features = ["derive", "cargo"] }
+colored = "2.1"
+indicatif = "0.17"
+
+# Concurrency & Performance
+rayon = "1.10"
+crossbeam = "0.8"
+num_cpus = "1.16"
+
+# Regex & Pattern Matching
+regex = "1.10"
+fancy-regex = "0.13"
+once_cell = "1.19"
+
+# File System
+ignore = "0.4"
+walkdir = "2.5"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+csv = "1.3"
+
+# Templating & Time
+tera = "1.19"
+chrono = "0.4"
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Document Extraction
+lopdf = "0.32"              # PDF text extraction
+zip = "0.6"                 # DOCX support
+quick-xml = "0.31"          # XML parsing for DOCX
+calamine = "0.24"           # Excel/XLSX parsing
+encoding_rs = "0.8"         # Character encoding detection
+
+# Crypto/Hashing (voor validatie)
+sha2 = "0.10"
+base64 = "0.22"
+
+# Entropy berekening
+ordered-float = "4.2"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.10"
+pretty_assertions = "1.4"
+
+[[bench]]
+name = "scan_benchmark"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1  # Snellere development builds
