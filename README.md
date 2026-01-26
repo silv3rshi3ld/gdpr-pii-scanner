@@ -56,8 +56,8 @@ PII-Radar is a blazing-fast command-line tool that scans your local directories 
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/pii-radar
-cd pii-radar
+git clone https://github.com/silv3rshi3ld/gdpr-pii-scanner
+cd gdpr-pii-scanner
 cargo build --release
 sudo cp target/release/pii-radar /usr/local/bin/
 ```
@@ -65,7 +65,7 @@ sudo cp target/release/pii-radar /usr/local/bin/
 ### Using Cargo
 
 ```bash
-cargo install pii-radar
+cargo install --git https://github.com/silv3rshi3ld/gdpr-pii-scanner
 ```
 
 ## Quick Start
