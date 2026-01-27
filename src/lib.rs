@@ -3,6 +3,7 @@
 /// Detects Personally Identifiable Information (PII) across European countries
 /// with support for GDPR special category data detection via context analysis.
 pub mod cli;
+pub mod config;
 pub mod core;
 pub mod crawler;
 pub mod detectors;
@@ -12,16 +13,17 @@ pub mod scanner;
 pub mod utils;
 
 // Re-export commonly used types
+pub use config::Config;
 pub use core::{
-    Confidence, ContextAnalyzer, Detector, DetectorRegistry, FileResult, GdprCategory, Match,
-    ScanResults, Severity, SpecialCategory,
+    default_plugins_dir, load_plugins, Confidence, ContextAnalyzer, Detector, DetectorRegistry,
+    FileResult, GdprCategory, Match, PluginDetector, ScanResults, Severity, SpecialCategory,
 };
 
 pub use crawler::{FileFilter, Walker};
 pub use extractors::{
     DocxExtractor, ExtractorError, ExtractorRegistry, PdfExtractor, TextExtractor, XlsxExtractor,
 };
-pub use reporter::{HtmlReporter, JsonReporter, TerminalReporter};
+pub use reporter::{CsvReporter, HtmlReporter, JsonReporter, TerminalReporter};
 pub use scanner::ScanEngine;
 
 pub use utils::{
@@ -41,6 +43,12 @@ pub fn default_registry() -> DetectorRegistry {
     // Belgium
     registry.register(Box::new(detectors::be::RrnDetector::new()));
 
+    // Denmark
+    registry.register(Box::new(detectors::dk::CprDetector::new()));
+
+    // Finland
+    registry.register(Box::new(detectors::fi::HetuDetector::new()));
+
     // France
     registry.register(Box::new(detectors::fr::NirDetector::new()));
 
@@ -53,15 +61,24 @@ pub fn default_registry() -> DetectorRegistry {
     // Netherlands
     registry.register(Box::new(detectors::nl::BsnDetector::new()));
 
+    // Norway
+    registry.register(Box::new(detectors::no::FodselsnummerDetector::new()));
+
+    // Poland
+    registry.register(Box::new(detectors::pl::PeselDetector::new()));
+
+    // Portugal
+    registry.register(Box::new(detectors::pt::NifDetector::new()));
+
     // Spain
     registry.register(Box::new(detectors::es::DniDetector::new()));
     registry.register(Box::new(detectors::es::NieDetector::new()));
 
+    // Sweden
+    registry.register(Box::new(detectors::se::PersonnummerDetector::new()));
+
     // United Kingdom
     registry.register(Box::new(detectors::gb::NhsDetector::new()));
-
-    // Portugal
-    registry.register(Box::new(detectors::pt::NifDetector::new()));
 
     // Pan-European detectors
     registry.register(Box::new(detectors::eu::IbanDetector::new()));
@@ -102,6 +119,16 @@ pub fn registry_for_countries(countries: Vec<String>) -> DetectorRegistry {
         registry.register(Box::new(detectors::be::RrnDetector::new()));
     }
 
+    // Denmark
+    if should_include("dk") {
+        registry.register(Box::new(detectors::dk::CprDetector::new()));
+    }
+
+    // Finland
+    if should_include("fi") {
+        registry.register(Box::new(detectors::fi::HetuDetector::new()));
+    }
+
     // France
     if should_include("fr") {
         registry.register(Box::new(detectors::fr::NirDetector::new()));
@@ -122,10 +149,30 @@ pub fn registry_for_countries(countries: Vec<String>) -> DetectorRegistry {
         registry.register(Box::new(detectors::nl::BsnDetector::new()));
     }
 
+    // Norway
+    if should_include("no") {
+        registry.register(Box::new(detectors::no::FodselsnummerDetector::new()));
+    }
+
+    // Poland
+    if should_include("pl") {
+        registry.register(Box::new(detectors::pl::PeselDetector::new()));
+    }
+
+    // Portugal
+    if should_include("pt") {
+        registry.register(Box::new(detectors::pt::NifDetector::new()));
+    }
+
     // Spain
     if should_include("es") {
         registry.register(Box::new(detectors::es::DniDetector::new()));
         registry.register(Box::new(detectors::es::NieDetector::new()));
+    }
+
+    // Sweden
+    if should_include("se") {
+        registry.register(Box::new(detectors::se::PersonnummerDetector::new()));
     }
 
     // United Kingdom

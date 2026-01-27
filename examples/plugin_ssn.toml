@@ -1,0 +1,36 @@
+# Example Plugin Detector for PII-Radar
+#
+# Place this file in ~/.pii-radar/plugins/ to load it automatically
+#
+# This example detects US Social Security Numbers (SSN)
+
+[detector]
+id = "example_ssn"
+name = "Example US SSN Detector"
+country = "us"
+
+# Regex pattern to match SSN format: XXX-XX-XXXX
+pattern = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+
+# Severity level: low, medium, high, critical
+severity = "critical"
+
+# Confidence level: low, medium, high
+confidence = "medium"
+
+# Optional description
+description = "Detects US Social Security Numbers in XXX-XX-XXXX format"
+
+[validation]
+# Optional: Minimum length (without dashes: 9 digits)
+min_length = 11  # Including dashes
+
+# Optional: Maximum length
+max_length = 11
+
+# Optional: Checksum validation
+# Options: none, luhn, mod97, mod11
+checksum = "none"
+
+# Optional: Allowed characters (regex character class)
+# allowed_chars = "0-9-"

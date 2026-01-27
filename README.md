@@ -4,14 +4,15 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](CHANGELOG.md)
 
 PII-Radar is a blazing-fast command-line tool that scans your local directories for Personally Identifiable Information (PII) across European countries. Built with Rust for maximum performance and safety.
 
 ## Features
 
-- 🌍 **7 European Countries**: Detects PII from Belgium, France, Germany, Italy, Netherlands, Spain, UK
+- 🌍 **12 European Countries**: Detects PII from Belgium, Denmark, Finland, France, Germany, Italy, Netherlands, Norway, Poland, Spain, Sweden, UK
 - 📄 **Document Extraction**: Scans PDFs, DOCX, and XLSX files for PII
+- ⚙️ **Configuration File Support**: TOML-based configuration with environment variable expansion
 - ⚡ **High Performance**: Parallel file scanning with real-time progress bars
 - 🛡️ **GDPR Article 9 Detection**: Context-aware analysis detects special category data
 - 🎯 **Strict Validation**: Checksum algorithms minimize false positives
@@ -25,6 +26,12 @@ PII-Radar is a blazing-fast command-line tool that scans your local directories 
 ### Belgium 🇧🇪
 - **RRN** (Rijksregisternummer) - Modulus 97 validated
 
+### Denmark 🇩🇰
+- **CPR** (Civil Registration Number) - Modulus 11 validated
+
+### Finland 🇫🇮
+- **HETU** (Henkilötunnus) - Modulus 31 validated
+
 ### France 🇫🇷
 - **NIR** (Numéro de Sécurité Sociale) - Luhn mod 97 validated
 
@@ -37,9 +44,18 @@ PII-Radar is a blazing-fast command-line tool that scans your local directories 
 ### Netherlands 🇳🇱
 - **BSN** (Burgerservicenummer) - 11-proef validated
 
+### Norway 🇳🇴
+- **Fødselsnummer** (Birth Number) - Dual modulus 11 validated
+
+### Poland 🇵🇱
+- **PESEL** (Powszechny Elektroniczny System Ewidencji Ludności) - Weighted checksum validated
+
 ### Spain 🇪🇸
 - **DNI** (Documento Nacional de Identidad) - Modulus 23 validated
 - **NIE** (Número de Identidad de Extranjero) - Modulus 23 validated
+
+### Sweden 🇸🇪
+- **Personnummer** (Personal Identity Number) - Luhn algorithm validated
 
 ### United Kingdom 🇬🇧
 - **NHS Number** (National Health Service) - Modulus 11 validated

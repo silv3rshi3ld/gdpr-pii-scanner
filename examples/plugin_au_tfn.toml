@@ -1,0 +1,25 @@
+# Example Plugin: Australian Tax File Number (TFN)
+#
+# This plugin detects Australian TFN numbers and validates them using a
+# weighted checksum algorithm.
+
+[detector]
+id = "au_tfn"
+name = "Australian Tax File Number"
+country = "au"
+
+# Pattern: 9 digits, optionally with spaces XXX XXX XXX
+pattern = "\\b\\d{3}\\s?\\d{3}\\s?\\d{3}\\b"
+
+severity = "critical"
+confidence = "high"
+
+description = "Detects Australian Tax File Numbers with checksum validation"
+
+[validation]
+min_length = 9
+max_length = 11  # With spaces
+
+# Note: TFN uses a complex checksum, but we'll use mod11 as approximation
+# For production use, implement custom checksum in Rust
+checksum = "mod11"

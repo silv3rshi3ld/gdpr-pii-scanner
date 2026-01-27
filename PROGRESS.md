@@ -1,12 +1,52 @@
-# PII-Radar v0.3.0 - Progress Status
+# PII-Radar v0.4.0 - Progress Status
 
 > **For detailed information, see [ROADMAP.md](ROADMAP.md)**
 
-## Current Status (2026-01-27)
+## Current Status (2026-01-28)
 
-**Version:** v0.3.0 ✅ COMPLETE  
-**Tests:** 199 passing  
-**Status:** 🎉 **ALL PHASE 3 OBJECTIVES ACHIEVED**
+**Version:** v0.4.0 ⚠️ PARTIAL COMPLETE  
+**Tests:** 251 passing  
+**Status:** 🚀 **2 of 7 v0.4.0 features implemented**
+
+---
+
+## v0.4.0 Status - Configuration & Nordic Countries
+
+### ✅ COMPLETE: Configuration File Support
+- [x] TOML-based configuration with `toml` and `dirs` crates
+- [x] Environment variable expansion (`${VAR_NAME}` syntax)
+- [x] Configuration precedence: CLI > config file > defaults
+- [x] Example config file with all sections documented
+- [x] 6 tests passing for config module
+
+### ✅ COMPLETE: Nordic/Central European Country Detectors (5 detectors)
+- [x] Poland PESEL detector (weighted checksum, 9 tests)
+- [x] Denmark CPR detector (modulus 11, 5 tests)
+- [x] Sweden Personnummer detector (Luhn algorithm, 5 tests)
+- [x] Norway Fødselsnummer detector (dual mod 11, 5 tests)
+- [x] Finland HETU detector (modulus 31, 6 tests)
+
+### ⏳ TODO: Remaining v0.4.0 Features
+- [ ] Custom detector plugin system (4-5h estimated)
+- [ ] Database scanning (PostgreSQL, MySQL) (14-18h estimated)
+- [ ] API endpoint scanning (4-6h estimated)
+- [ ] Machine learning-based detection (20-30h estimated)
+- [ ] CSV report format (2-3h estimated)
+
+---
+
+## Key Metrics - v0.4.0 Current Progress
+
+| Metric | v0.3.0 | v0.4.0 Current | v0.4.0 Target | Status |
+|--------|--------|----------------|---------------|--------|
+| Detectors | 11 | **16** | 16+ | ✅ 100% |
+| Countries | 7 | **12** | 12 | ✅ 100% |
+| Tests | 199 | **251** | 270+ | 🟢 93% |
+| Features | 11 | **13** | 18 | 🟡 72% |
+| Report Formats | 3 | **3** | 4 (CSV) | 🟢 75% |
+| Data Sources | 1 (files) | **1** | 3 (DB, API) | 🔴 33% |
+
+**Legend:** 🔴 <50% | 🟡 50-75% | 🟢 75-99% | ✅ 100%
 
 ---
 

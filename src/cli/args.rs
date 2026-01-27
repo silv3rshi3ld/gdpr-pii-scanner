@@ -67,6 +67,10 @@ pub enum Commands {
         /// Maximum file size to scan in MB
         #[arg(long, value_name = "SIZE", default_value = "100")]
         max_filesize: u64,
+
+        /// Load custom detector plugins from directory
+        #[arg(long, value_name = "DIR")]
+        plugins: Option<PathBuf>,
     },
 
     /// List all available detectors
@@ -87,6 +91,8 @@ pub enum OutputFormat {
     JsonCompact,
     /// HTML report
     Html,
+    /// CSV (Comma-Separated Values)
+    Csv,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

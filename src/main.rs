@@ -2,8 +2,9 @@
 use clap::Parser;
 use pii_radar::cli::{Cli, Commands, OutputFormat};
 use pii_radar::{
-    default_registry, registry_for_countries, DocxExtractor, ExtractorRegistry, HtmlReporter,
-    JsonReporter, PdfExtractor, ScanEngine, TerminalReporter, Walker, XlsxExtractor,
+    default_registry, registry_for_countries, CsvReporter, DocxExtractor, ExtractorRegistry,
+    HtmlReporter, JsonReporter, PdfExtractor, ScanEngine, TerminalReporter, Walker,
+    XlsxExtractor,
 };
 use std::process;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ fn main() {
             max_depth,
             threads,
             max_filesize,
+            plugins,
         } => {
             // Validate directory
             if !directory.exists() {
@@ -41,7 +43,7 @@ fn main() {
             }
 
             // Build registry (with optional country filtering)
-            let registry = if let Some(country_list) = countries {
+            let mut registry = if let Some(country_list) = countries {
                 let codes: Vec<String> = country_list
                     .split(',')
                     .map(|s| s.trim().to_lowercase())
@@ -52,6 +54,27 @@ fn main() {
             } else {
                 default_registry()
             };
+
+            // Load plugin detectors
+            let plugins_dir = plugins.unwrap_or_else(|| {
+                pii_radar::default_plugins_dir()
+            });
+
+            if plugins_dir.exists() {
+                match pii_radar::load_plugins(&plugins_dir) {
+                    Ok(plugin_detectors) => {
+                        if !plugin_detectors.is_empty() {
+                            println!("🔌 Loaded {} plugin detector(s)\n", plugin_detectors.len());
+                            for detector in plugin_detectors {
+                                registry.register(detector);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Warning: Failed to load plugins: {}", e);
+                    }
+                }
+            }
 
             println!("🔍 Using {} detectors\n", registry.all().len());
 
@@ -125,6 +148,20 @@ fn main() {
                         process::exit(1);
                     }
                     println!("✅ HTML report written to: {}", output_path.display());
+                }
+                OutputFormat::Csv => {
+                    let reporter = CsvReporter::new().with_context(!no_context);
+
+                    if let Some(path) = output {
+                        if let Err(e) = reporter.write_to_file(&filtered_results, &path) {
+                            eprintln!("❌ Error: {}", e);
+                            process::exit(1);
+                        }
+                        println!("✅ CSV report written to: {}", path.display());
+                    } else if let Err(e) = reporter.print(&filtered_results) {
+                        eprintln!("❌ Error: {}", e);
+                        process::exit(1);
+                    }
                 }
             }
 
