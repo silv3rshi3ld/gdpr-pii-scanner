@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_xlsx_extractor_default() {
-        let extractor = XlsxExtractor::default();
+        let extractor = XlsxExtractor;
         assert_eq!(extractor.name(), "Excel Extractor");
     }
 

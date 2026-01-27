@@ -30,28 +30,34 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-registry-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-cargo-registry-
+            ${{ runner.os }}-cargo-registry-
       
       - name: Cache cargo index
         uses: actions/cache@v4
         with:
           path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-index-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-cargo-index-
+            ${{ runner.os }}-cargo-index-
       
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-build-target-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-cargo-build-target-
+            ${{ runner.os }}-cargo-build-
       
       - name: Build
         run: cargo build --verbose
       
       - name: Run tests
         run: cargo test --verbose --all
-      
-      - name: Run integration tests
-        run: cargo test --test integration_tests --verbose
 
   lint:
     name: Lint
@@ -114,13 +120,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       
       - name: Run benchmarks
-        run: cargo bench --no-fail-fast
+        run: cargo bench --no-fail-fast -- --output-format bencher | tee output.txt
       
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1
+        if: always()
         with:
           tool: 'cargo'
-          output-file-path: target/criterion/output.txt
+          output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false
+          alert-threshold: '150%'
           comment-on-alert: true
+          fail-on-alert: false

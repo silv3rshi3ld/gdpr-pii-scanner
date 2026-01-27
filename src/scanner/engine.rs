@@ -313,7 +313,7 @@ mod tests {
         let result = engine.scan_file(&pdf_path);
         assert!(result.error.is_none(), "PDF extraction should succeed");
         assert!(
-            result.matches.len() > 0,
+            !result.matches.is_empty(),
             "Should find PII in extracted PDF text"
         );
     }

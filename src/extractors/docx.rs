@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_docx_extractor_default() {
-        let extractor = DocxExtractor::default();
+        let extractor = DocxExtractor;
         assert_eq!(extractor.name(), "DOCX Extractor");
     }
 
