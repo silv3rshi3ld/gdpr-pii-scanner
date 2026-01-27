@@ -55,7 +55,7 @@ sha2 = "0.10"
 base64 = "0.22"
 
 # Entropy berekening
-ordered-float = "4.2"
+ordered-float = "5.1"
 
 # Logging
 log = "0.4"
