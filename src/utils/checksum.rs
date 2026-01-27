@@ -329,7 +329,7 @@ pub fn validate_spain_id(id: &str) -> bool {
 /// ```
 /// use pii_radar::validate_belgian_rrn;
 ///
-/// assert!(validate_belgian_rrn("85073000184")); // Valid RRN
+/// assert!(validate_belgian_rrn("85073000160")); // Valid RRN
 /// ```
 pub fn validate_belgian_rrn(rrn: &str) -> bool {
     // Remove separators

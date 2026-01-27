@@ -26,7 +26,8 @@ pub use scanner::ScanEngine;
 
 pub use utils::{
     is_high_entropy, mask_credit_card, mask_email, mask_iban, mask_phone, mask_value,
-    shannon_entropy, validate_bsn_11_proef, validate_iban, validate_luhn,
+    shannon_entropy, validate_belgian_rrn, validate_bsn_11_proef, validate_iban, validate_luhn,
+    validate_nhs_number, validate_spain_id,
 };
 
 /// Library version
