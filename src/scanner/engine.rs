@@ -113,10 +113,10 @@ impl ScanEngine {
                         m.location.end_byte,
                     ) {
                         // Upgrade severity if special category detected
-                        if context.category.is_some() {
+                        if let Some(category) = context.category {
                             m.severity = crate::core::Severity::Critical;
                             m.gdpr_category = GdprCategory::Special {
-                                category: context.category.unwrap(),
+                                category,
                                 detected_keywords: context.keywords.clone(),
                             };
                         }
