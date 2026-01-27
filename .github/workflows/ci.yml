@@ -82,8 +82,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Cache cargo-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit
+      
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: |
+          if [ ! -f ~/.cargo/bin/cargo-audit ]; then
+            cargo install cargo-audit --locked
+          fi
       
       - name: Run security audit
         run: cargo audit
@@ -97,17 +106,27 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
+      - name: Cache cargo tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tarpaulin
+          key: ${{ runner.os }}-cargo-tarpaulin-0.27.3
+      
       - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: |
+          if [ ! -f ~/.cargo/bin/cargo-tarpaulin ]; then
+            cargo install cargo-tarpaulin --version 0.27.3 --locked
+          fi
       
       - name: Generate coverage
-        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml
+        run: cargo tarpaulin --verbose --all-features --workspace --timeout 300 --out xml --engine llvm
       
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+          files: ./cobertura.xml
 
   benchmark:
     name: Performance Benchmarks
