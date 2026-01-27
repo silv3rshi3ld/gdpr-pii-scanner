@@ -54,7 +54,8 @@ impl DocxExtractor {
                 Ok(Event::GeneralRef(entity)) => {
                     if in_text_element {
                         // Expand common HTML entities
-                        let entity_name = reader.decoder().decode(entity.as_ref()).unwrap_or_default();
+                        let entity_name =
+                            reader.decoder().decode(entity.as_ref()).unwrap_or_default();
                         let expanded = match entity_name.as_ref() {
                             "amp" => "&",
                             "lt" => "<",

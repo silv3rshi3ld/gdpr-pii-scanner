@@ -96,7 +96,10 @@ impl DetectorRegistry {
 
     /// Get detector by ID
     pub fn get(&self, id: &str) -> Option<&dyn Detector> {
-        self.detectors.iter().map(|d| d.as_ref()).find(|d| d.id() == id)
+        self.detectors
+            .iter()
+            .map(|d| d.as_ref())
+            .find(|d| d.id() == id)
     }
 
     /// List all detector IDs
