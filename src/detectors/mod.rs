@@ -6,9 +6,9 @@ pub mod financial; // Universal financial
 pub mod fr; // France
 pub mod gb; // United Kingdom
 pub mod it; // Italy
-/// PII Detectors for various countries and data types
 pub mod nl; // Netherlands
 pub mod personal; // Universal personal
+pub mod pt; // Portugal
 pub mod security; // Universal security
 
 // Re-export common detector types

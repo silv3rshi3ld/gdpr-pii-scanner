@@ -102,7 +102,7 @@ pub fn validate_luhn(number: &str) -> bool {
         })
         .sum();
 
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 /// Valideert een IBAN (International Bank Account Number) met modulo-97
@@ -155,7 +155,7 @@ pub fn validate_iban(iban: &str) -> bool {
                 c.to_string()
             } else {
                 // Ongeldig karakter
-                return String::from("X"); // Dit zorgt voor een ongeldige IBAN
+                String::from("X") // Dit zorgt voor een ongeldige IBAN
             }
         })
         .collect();
@@ -430,6 +430,60 @@ pub fn validate_steuer_id(id: &str) -> bool {
     calculated_check == digits[10]
 }
 
+/// Validates a Portuguese NIF (Número de Identificação Fiscal)
+///
+/// The NIF is a 9-digit tax identification number.
+/// Validation algorithm:
+/// 1. First digit must be 1, 2, 3, 5, 6, or 9
+/// 2. Multiply each of the first 8 digits by (9, 8, 7, 6, 5, 4, 3, 2)
+/// 3. Sum the products
+/// 4. Check digit = 11 - (sum % 11)
+/// 5. If check digit is 10 or 11, it becomes 0
+///
+/// # Examples
+/// ```
+/// use pii_radar::utils::checksum::validate_portugal_nif;
+///
+/// assert!(validate_portugal_nif("123456789"));  // Valid NIF
+/// assert!(!validate_portugal_nif("123456780")); // Invalid NIF
+/// ```
+pub fn validate_portugal_nif(nif: &str) -> bool {
+    // Remove non-digit characters
+    let digits: Vec<u32> = nif
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .filter_map(|c| c.to_digit(10))
+        .collect();
+
+    // Must be exactly 9 digits
+    if digits.len() != 9 {
+        return false;
+    }
+
+    // First digit must be 1, 2, 3, 5, 6, or 9
+    let first_digit = digits[0];
+    if ![1, 2, 3, 5, 6, 9].contains(&first_digit) {
+        return false;
+    }
+
+    // Calculate checksum using modulus 11
+    let multipliers = [9, 8, 7, 6, 5, 4, 3, 2];
+    let sum: u32 = digits[..8]
+        .iter()
+        .zip(multipliers.iter())
+        .map(|(d, m)| d * m)
+        .sum();
+
+    let remainder = sum % 11;
+    let check_digit = if remainder == 0 || remainder == 1 {
+        0
+    } else {
+        11 - remainder
+    };
+
+    check_digit == digits[8]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -674,5 +728,47 @@ mod tests {
         assert!(!validate_steuer_id("8609574271")); // Too short (10 digits)
         assert!(!validate_steuer_id("860957427190")); // Too long (12 digits)
         assert!(!validate_steuer_id("")); // Empty
+    }
+
+    // ===== Portugal NIF Tests =====
+
+    #[test]
+    fn test_nif_valid() {
+        // Valid Portuguese NIFs (mathematically correct)
+        assert!(validate_portugal_nif("123456789"));
+        assert!(validate_portugal_nif("234567899"));
+        assert!(validate_portugal_nif("503442267"));
+    }
+
+    #[test]
+    fn test_nif_valid_with_spaces() {
+        assert!(validate_portugal_nif("123 456 789"));
+        assert!(validate_portugal_nif("234 567 899"));
+    }
+
+    #[test]
+    fn test_nif_invalid_checksum() {
+        assert!(!validate_portugal_nif("123456780")); // Wrong check digit
+        assert!(!validate_portugal_nif("234567891")); // Wrong check digit
+    }
+
+    #[test]
+    fn test_nif_invalid_first_digit() {
+        assert!(!validate_portugal_nif("423456789")); // Invalid first digit (4)
+        assert!(!validate_portugal_nif("723456789")); // Invalid first digit (7)
+        assert!(!validate_portugal_nif("823456789")); // Invalid first digit (8)
+    }
+
+    #[test]
+    fn test_nif_wrong_length() {
+        assert!(!validate_portugal_nif("12345678")); // Too short (8 digits)
+        assert!(!validate_portugal_nif("1234567890")); // Too long (10 digits)
+        assert!(!validate_portugal_nif("")); // Empty
+    }
+
+    #[test]
+    fn test_nif_non_numeric() {
+        assert!(!validate_portugal_nif("abcdefghi"));
+        assert!(!validate_portugal_nif("12345678X"));
     }
 }

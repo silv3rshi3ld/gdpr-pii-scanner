@@ -1,5 +1,5 @@
 /// Registry for managing text extractors
-use super::{ExtractorError, TextExtractor};
+use super::TextExtractor;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -71,6 +71,7 @@ impl Default for ExtractorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extractors::ExtractorError;
     use std::path::Path;
 
     // Mock extractor for testing

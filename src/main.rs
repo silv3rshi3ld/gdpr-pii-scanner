@@ -66,7 +66,7 @@ fn main() {
                 walker = walker.threads(t);
             }
 
-            walker = walker.max_filesize(max_filesize * 1024 * 1024);
+            let _walker = walker.max_filesize(max_filesize * 1024 * 1024);
 
             // Create engine
             let mut engine = ScanEngine::new(registry)
@@ -109,11 +109,9 @@ fn main() {
                             process::exit(1);
                         }
                         println!("✅ Results written to: {}", path.display());
-                    } else {
-                        if let Err(e) = reporter.print(&filtered_results) {
-                            eprintln!("❌ Error: {}", e);
-                            process::exit(1);
-                        }
+                    } else if let Err(e) = reporter.print(&filtered_results) {
+                        eprintln!("❌ Error: {}", e);
+                        process::exit(1);
                     }
                 }
                 OutputFormat::Html => {

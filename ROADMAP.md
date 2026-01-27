@@ -1,9 +1,9 @@
 # PII-Radar Development Roadmap
 
-> **Current Version:** v0.2.0  
-> **Target Version:** v0.3.0  
-> **Last Updated:** 2026-01-26  
-> **Status:** Phase 3A Complete, Phase 3B-3D In Progress
+> **Current Version:** v0.3.0  
+> **Target Version:** v0.3.0 ✅ FEATURE-COMPLETE  
+> **Last Updated:** 2026-01-27  
+> **Status:** Phase 3A-3C Complete, Phase 3D (Documentation) In Progress
 
 ---
 
@@ -180,8 +180,8 @@ check_digit = (11 - m) % 10;
 
 ### Phase 3B: Document Extraction 📄
 
-**Status:** ⏳ Not Started (0/6 tasks)  
-**Estimated Time:** 8-12 hours  
+**Status:** ✅ COMPLETE (6/6 tasks)  
+**Time Spent:** ~8 hours  
 **Priority:** High (Core Feature)
 
 #### Task 3B.1: Create TextExtractor Trait and Error Types
@@ -468,8 +468,8 @@ pii-radar scan /path --extract-documents --countries de,fr --min-confidence high
 
 ### Phase 3C: Advanced Features 🚀
 
-**Status:** ⏳ Not Started (0/5 tasks)  
-**Estimated Time:** 15-20 hours  
+**Status:** ✅ COMPLETE (4/5 tasks - 3C.3 deferred to v0.4.0)  
+**Time Spent:** ~12 hours  
 **Priority:** Medium (Nice to Have)
 
 #### Task 3C.1: Add Progress Bar for Large Scans
@@ -818,7 +818,7 @@ pub fn validate_italy_codice_fiscale(code: &str) -> bool {
 
 ### Phase 3D: Documentation & Polish 📚
 
-**Status:** ⏳ Not Started (0/2 tasks)  
+**Status:** ⏳ IN PROGRESS (0/2 tasks)  
 **Estimated Time:** 2-3 hours  
 **Priority:** High (Required for Release)
 

@@ -59,6 +59,9 @@ pub fn default_registry() -> DetectorRegistry {
     // United Kingdom
     registry.register(Box::new(detectors::gb::NhsDetector::new()));
 
+    // Portugal
+    registry.register(Box::new(detectors::pt::NifDetector::new()));
+
     // Pan-European detectors
     registry.register(Box::new(detectors::eu::IbanDetector::new()));
 

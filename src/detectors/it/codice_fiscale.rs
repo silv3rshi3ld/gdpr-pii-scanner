@@ -153,7 +153,7 @@ impl CodiceFiscaleDetector {
     /// Validate day (01-31 for males, 41-71 for females)
     fn validate_day(day_str: &str) -> bool {
         if let Ok(day) = day_str.parse::<u32>() {
-            (day >= 1 && day <= 31) || (day >= 41 && day <= 71)
+            (1..=31).contains(&day) || (41..=71).contains(&day)
         } else {
             false
         }
