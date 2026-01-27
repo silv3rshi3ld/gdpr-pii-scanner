@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 [dependencies]
 # CLI & Argument Parsing
 clap = { version = "4.5", features = ["derive", "cargo"] }
-colored = "2.1"
+colored = "3.1"
 indicatif = "0.17"
 
 # Concurrency & Performance
