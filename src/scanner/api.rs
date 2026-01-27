@@ -2,11 +2,12 @@ use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
 
-use crate::core::types::{DetectionMatch, FileResult, ScanResult};
+use crate::core::types::{FileResult, Match, ScanResults};
 use crate::core::Detector;
 
 /// Configuration for API endpoint scanning
@@ -82,7 +83,7 @@ pub fn scan_api_endpoint(
     config: &ApiScanConfig,
     detectors: &[Box<dyn Detector>],
     min_confidence: &crate::core::types::Confidence,
-) -> Result<ScanResult> {
+) -> Result<ScanResults> {
     let start_time = std::time::Instant::now();
 
     // Validate URL
@@ -124,18 +125,33 @@ pub fn scan_api_endpoint(
         request = request.body(body.clone());
     }
 
-    // Execute request
-    let response = request
-        .send()
-        .context("Failed to send HTTP request")?;
+    // Execute request with detailed error handling
+    let response = match request.send() {
+        Ok(resp) => resp,
+        Err(e) => {
+            // Provide detailed error messages based on error type
+            if e.is_timeout() {
+                return Err(anyhow::anyhow!("Request timed out after {} seconds", config.timeout_secs));
+            } else if e.is_connect() {
+                return Err(anyhow::anyhow!("Connection failed: {}", e));
+            } else if e.is_request() {
+                return Err(anyhow::anyhow!("Request error: {}", e));
+            } else {
+                return Err(anyhow::anyhow!("HTTP request failed: {}", e));
+            }
+        }
+    };
 
-    // Check status code
+    // Check status code with detailed error handling
     let status = response.status();
     if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "HTTP request failed with status: {}",
-            status
-        ));
+        if status.is_client_error() {
+            return Err(anyhow::anyhow!("Client error: {} - {}", status, status.canonical_reason().unwrap_or("Unknown")));
+        } else if status.is_server_error() {
+            return Err(anyhow::anyhow!("Server error: {} - {}", status, status.canonical_reason().unwrap_or("Unknown")));
+        } else {
+            return Err(anyhow::anyhow!("HTTP request failed with status: {}", status));
+        }
     }
 
     // Get response body as text
@@ -145,10 +161,13 @@ pub fn scan_api_endpoint(
 
     let response_size = response_text.len();
 
+    // Create a pseudo-path for the API endpoint
+    let api_path = PathBuf::from(url);
+
     // Scan the response text for PII
     let mut all_matches = Vec::new();
     for detector in detectors {
-        let matches = detector.detect(&response_text);
+        let matches = detector.detect(&response_text, &api_path);
         for m in matches {
             if &m.confidence >= min_confidence {
                 all_matches.push(m);
@@ -160,19 +179,18 @@ pub fn scan_api_endpoint(
 
     // Create FileResult for the API endpoint
     let file_result = FileResult {
-        path: url.to_string(),
-        matches: all_matches.len(),
+        path: api_path,
+        matches: all_matches.clone(),
         size_bytes: response_size as u64,
         scan_time_ms: scan_time.as_millis() as u64,
         error: None,
     };
 
-    Ok(ScanResult {
+    Ok(ScanResults {
         total_files: 1,
         total_matches: all_matches.len(),
-        matches: all_matches,
         files: vec![file_result],
-        scan_duration: scan_time,
+        ..Default::default()
     })
 }
 
@@ -181,26 +199,24 @@ pub fn scan_api_endpoints(
     endpoints: &[(String, ApiScanConfig)],
     detectors: &[Box<dyn Detector>],
     min_confidence: &crate::core::types::Confidence,
-) -> Result<ScanResult> {
+) -> Result<ScanResults> {
     let start_time = std::time::Instant::now();
 
-    let mut all_matches = Vec::new();
     let mut all_files = Vec::new();
     let mut total_matches = 0;
 
     for (url, config) in endpoints {
         match scan_api_endpoint(url, config, detectors, min_confidence) {
             Ok(result) => {
-                all_matches.extend(result.matches);
-                all_files.extend(result.files);
                 total_matches += result.total_matches;
+                all_files.extend(result.files);
             }
             Err(e) => {
                 // Log error but continue with other endpoints
                 eprintln!("Failed to scan endpoint {}: {}", url, e);
                 all_files.push(FileResult {
-                    path: url.clone(),
-                    matches: 0,
+                    path: PathBuf::from(url),
+                    matches: Vec::new(),
                     size_bytes: 0,
                     scan_time_ms: 0,
                     error: Some(e.to_string()),
@@ -211,19 +227,18 @@ pub fn scan_api_endpoints(
 
     let scan_duration = start_time.elapsed();
 
-    Ok(ScanResult {
+    Ok(ScanResults {
         total_files: endpoints.len(),
         total_matches,
-        matches: all_matches,
         files: all_files,
-        scan_duration,
+        ..Default::default()
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{Confidence, GdprCategory, Severity};
+    use crate::core::types::{Confidence, GdprCategory, Location, Severity};
     use crate::core::Detector;
 
     // Mock detector for testing
@@ -242,24 +257,34 @@ mod tests {
             Some("Test detector".to_string())
         }
 
-        fn detect(&self, text: &str) -> Vec<DetectionMatch> {
+        fn country(&self) -> &str {
+            "TEST"
+        }
+
+        fn base_severity(&self) -> Severity {
+            Severity::Critical
+        }
+
+        fn detect(&self, text: &str, file_path: &std::path::Path) -> Vec<Match> {
             // Detect any 9-digit sequence as mock PII
             let re = regex::Regex::new(r"\b\d{9}\b").unwrap();
             re.find_iter(text)
-                .map(|m| DetectionMatch {
+                .map(|m| Match {
                     detector_id: self.id().to_string(),
                     detector_name: self.name().to_string(),
-                    value: m.as_str().to_string(),
-                    masked_value: format!("{}*****{}", &m.as_str()[..2], &m.as_str()[7..]),
-                    start: m.start(),
-                    end: m.end(),
-                    line: 1,
-                    column: m.start() + 1,
+                    country: self.country().to_string(),
+                    value_masked: format!("{}*****{}", &m.as_str()[..2], &m.as_str()[7..]),
+                    location: Location {
+                        file_path: file_path.to_path_buf(),
+                        line: 1,
+                        column: m.start(),
+                        start_byte: m.start(),
+                        end_byte: m.end(),
+                    },
                     confidence: Confidence::High,
                     severity: Severity::Critical,
-                    country: Some("TEST".to_string()),
-                    gdpr_category: GdprCategory::Regular,
                     context: None,
+                    gdpr_category: GdprCategory::Regular,
                 })
                 .collect()
         }

@@ -79,6 +79,49 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+
+    /// Scan API endpoints for PII
+    Api {
+        /// API endpoint URL(s) to scan
+        #[arg(value_name = "URL", required = true)]
+        urls: Vec<String>,
+
+        /// HTTP method (GET, POST, PUT, PATCH, DELETE)
+        #[arg(short, long, value_name = "METHOD", default_value = "GET")]
+        method: String,
+
+        /// Request headers in KEY:VALUE format (can be specified multiple times)
+        #[arg(short = 'H', long = "header", value_name = "HEADER")]
+        headers: Vec<String>,
+
+        /// Request body for POST/PUT/PATCH
+        #[arg(short, long, value_name = "BODY")]
+        body: Option<String>,
+
+        /// Request timeout in seconds
+        #[arg(long, value_name = "SECONDS", default_value = "30")]
+        timeout: u64,
+
+        /// Disable following redirects
+        #[arg(long)]
+        no_redirects: bool,
+
+        /// Output format
+        #[arg(short, long, value_name = "FORMAT", default_value = "terminal")]
+        format: OutputFormat,
+
+        /// Output file (for json/csv formats)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+
+        /// Minimum confidence level to report
+        #[arg(long, value_name = "LEVEL", default_value = "high")]
+        min_confidence: ConfidenceLevel,
+
+        /// Load custom detector plugins from directory
+        #[arg(long, value_name = "DIR")]
+        plugins: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

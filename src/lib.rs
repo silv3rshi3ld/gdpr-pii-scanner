@@ -24,7 +24,7 @@ pub use extractors::{
     DocxExtractor, ExtractorError, ExtractorRegistry, PdfExtractor, TextExtractor, XlsxExtractor,
 };
 pub use reporter::{CsvReporter, HtmlReporter, JsonReporter, TerminalReporter};
-pub use scanner::ScanEngine;
+pub use scanner::{ApiScanConfig, HttpMethod, ScanEngine, scan_api_endpoint, scan_api_endpoints};
 
 pub use utils::{
     is_high_entropy, mask_credit_card, mask_email, mask_iban, mask_phone, mask_value,
