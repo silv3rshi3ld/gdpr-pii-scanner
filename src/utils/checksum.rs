@@ -1,11 +1,11 @@
-/// Checksum validation utilities voor PII detectie
-///
-/// Dit module bevat algoritmes voor:
-///
-/// - Nederlandse BSN 11-proef validatie
-/// - Luhn algoritme (creditcards)
-/// - IBAN modulo-97 validatie
-/// - Modulo-10 en modulo-11 checksums
+//! Checksum validation utilities voor PII detectie
+//!
+//! Dit module bevat algoritmes voor:
+//!
+//! - Nederlandse BSN 11-proef validatie
+//! - Luhn algoritme (creditcards)
+//! - IBAN modulo-97 validatie
+//! - Modulo-10 en modulo-11 checksums
 
 /// Valideert een Nederlands BSN (Burgerservicenummer) met de 11-proef
 ///

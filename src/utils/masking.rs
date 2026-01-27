@@ -1,4 +1,4 @@
-/// PII masking utilities for safe display and logging
+//! PII masking utilities for safe display and logging
 
 /// Mask a PII value for display
 ///

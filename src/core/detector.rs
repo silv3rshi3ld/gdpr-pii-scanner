@@ -86,16 +86,17 @@ impl DetectorRegistry {
     }
 
     /// Get detectors for specific country
-    pub fn for_country(&self, country: &str) -> Vec<&Box<dyn Detector>> {
+    pub fn for_country(&self, country: &str) -> Vec<&dyn Detector> {
         self.detectors
             .iter()
+            .map(|d| d.as_ref())
             .filter(|d| d.country() == country || d.country() == "universal")
             .collect()
     }
 
     /// Get detector by ID
-    pub fn get(&self, id: &str) -> Option<&Box<dyn Detector>> {
-        self.detectors.iter().find(|d| d.id() == id)
+    pub fn get(&self, id: &str) -> Option<&dyn Detector> {
+        self.detectors.iter().map(|d| d.as_ref()).find(|d| d.id() == id)
     }
 
     /// List all detector IDs
@@ -142,9 +143,10 @@ impl DetectorRegistry {
     /// let registry = default_registry();
     /// let gb_detectors = registry.for_countries(&["gb"]);
     /// ```
-    pub fn for_countries(&self, countries: &[&str]) -> Vec<&Box<dyn Detector>> {
+    pub fn for_countries(&self, countries: &[&str]) -> Vec<&dyn Detector> {
         self.detectors
             .iter()
+            .map(|d| d.as_ref())
             .filter(|d| countries.contains(&d.country()) || d.country() == "universal")
             .collect()
     }
