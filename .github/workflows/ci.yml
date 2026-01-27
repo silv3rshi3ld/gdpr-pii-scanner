@@ -106,27 +106,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Cache cargo tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-tarpaulin
-          key: ${{ runner.os }}-cargo-tarpaulin-0.27.3
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
       
-      - name: Install tarpaulin
-        run: |
-          if [ ! -f ~/.cargo/bin/cargo-tarpaulin ]; then
-            cargo install cargo-tarpaulin --version 0.27.3 --locked
-          fi
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json
       
-      - name: Generate coverage
-        run: cargo tarpaulin --verbose --all-features --workspace --timeout 300 --out xml --engine llvm
-      
-      - name: Upload to codecov.io
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: codecov.json
           fail_ci_if_error: false
-          files: ./cobertura.xml
 
   benchmark:
     name: Performance Benchmarks
