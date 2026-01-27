@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 # CLI & Argument Parsing
 clap = { version = "4.5", features = ["derive", "cargo"] }
 colored = "2.1"
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Concurrency & Performance
 rayon = "1.10"
