@@ -41,7 +41,7 @@ chrono = "0.4"
 
 # Error Handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Document Extraction
 lopdf = "0.32"              # PDF text extraction
