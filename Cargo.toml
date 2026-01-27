@@ -45,7 +45,7 @@ thiserror = "1.0"
 
 # Document Extraction
 lopdf = "0.32"              # PDF text extraction
-zip = "0.6"                 # DOCX support
+zip = "7.2"                 # DOCX support
 quick-xml = "0.31"          # XML parsing for DOCX
 calamine = "0.24"           # Excel/XLSX parsing
 encoding_rs = "0.8"         # Character encoding detection
