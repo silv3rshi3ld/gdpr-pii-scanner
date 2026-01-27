@@ -17,7 +17,7 @@ impl DocxExtractor {
     /// Extract text from an XML content part
     fn extract_text_from_xml(xml_content: &str) -> Result<String, ExtractorError> {
         let mut reader = Reader::from_str(xml_content);
-        reader.trim_text(true);
+        reader.config_mut().trim_text(true);
 
         let mut text = String::new();
         let mut buf = Vec::new();
@@ -33,10 +33,15 @@ impl DocxExtractor {
                 }
                 Ok(Event::Text(e)) => {
                     if in_text_element {
-                        let txt = e.unescape().map_err(|e| {
-                            ExtractorError::ExtractionFailed(format!("XML decode error: {}", e))
-                        })?;
-                        text.push_str(&txt);
+                        match reader.decoder().decode(e.as_ref()) {
+                            Ok(txt) => text.push_str(&txt),
+                            Err(e) => {
+                                return Err(ExtractorError::ExtractionFailed(format!(
+                                    "XML decode error: {}",
+                                    e
+                                )))
+                            }
+                        }
                     }
                 }
                 Ok(Event::End(ref e)) => {
