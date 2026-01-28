@@ -43,7 +43,7 @@ impl CprDetector {
 
         let sum: u32 = digits.iter().zip(weights.iter()).map(|(d, w)| d * w).sum();
 
-        sum % 11 == 0
+        sum.is_multiple_of(11)
     }
 
     /// Validate date components

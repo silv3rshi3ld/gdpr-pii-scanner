@@ -300,7 +300,7 @@ mod tests {
         // Test with generic API key pattern instead of specific Stripe format
         let text = r#"api_key="pk_live_ABCDEF1234567890TESTONLY""#;
         let matches = detector.detect(text, Path::new(".env"));
-        assert!(matches.len() >= 1);
+        assert!(!matches.is_empty());
         // Verify key detection works
         assert!(matches[0].detector_id.contains("api_key"));
     }

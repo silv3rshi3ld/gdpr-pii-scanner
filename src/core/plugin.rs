@@ -212,7 +212,7 @@ impl PluginDetector {
             })
             .sum();
 
-        sum % 10 == 0
+        sum.is_multiple_of(10)
     }
 
     fn validate_mod97(&self, value: &str) -> bool {
@@ -242,7 +242,7 @@ impl PluginDetector {
             })
             .sum();
 
-        sum % 11 == 0
+        sum.is_multiple_of(11)
     }
 }
 

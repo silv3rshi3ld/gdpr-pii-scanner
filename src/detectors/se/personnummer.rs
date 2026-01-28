@@ -73,7 +73,7 @@ impl PersonnummerDetector {
                 })
                 .sum();
 
-            sum % 10 == 0
+            sum.is_multiple_of(10)
         } else {
             false
         }

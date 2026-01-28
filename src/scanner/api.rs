@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
 
-use crate::core::types::{FileResult, Match, ScanResults};
+use crate::core::types::{FileResult, ScanResults};
 use crate::core::Detector;
 
 /// Configuration for API endpoint scanning
@@ -250,7 +250,7 @@ pub fn scan_api_endpoints(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{Confidence, GdprCategory, Location, Severity};
+    use crate::core::types::{Confidence, GdprCategory, Location, Match, Severity};
     use crate::core::Detector;
 
     // Mock detector for testing

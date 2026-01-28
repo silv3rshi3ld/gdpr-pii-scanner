@@ -36,7 +36,7 @@ async fn main() {
                 no_progress,
             } = cli.command
             {
-                handle_scan_db(
+                handle_scan_db(DbScanParams {
                     db_type,
                     connection,
                     database,
@@ -51,7 +51,7 @@ async fn main() {
                     output,
                     countries,
                     no_progress,
-                )
+                })
                 .await;
             }
         }
@@ -112,7 +112,7 @@ fn handle_file_commands(command: Commands) {
             };
 
             // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(|| pii_radar::default_plugins_dir());
+            let plugins_dir = plugins.unwrap_or_else(pii_radar::default_plugins_dir);
 
             if plugins_dir.exists() {
                 match pii_radar::load_plugins(&plugins_dir) {
@@ -298,7 +298,7 @@ fn handle_file_commands(command: Commands) {
             let mut registry = default_registry();
 
             // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(|| pii_radar::default_plugins_dir());
+            let plugins_dir = plugins.unwrap_or_else(pii_radar::default_plugins_dir);
 
             if plugins_dir.exists() {
                 match pii_radar::load_plugins(&plugins_dir) {
@@ -329,7 +329,7 @@ fn handle_file_commands(command: Commands) {
             let min_conf: pii_radar::Confidence = min_confidence.into();
             let detectors = registry.all();
 
-            let results = match scan_api_endpoints(&endpoints, &detectors, &min_conf) {
+            let results = match scan_api_endpoints(&endpoints, detectors, &min_conf) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("❌ Error: {}", e);
@@ -401,7 +401,7 @@ fn handle_file_commands(command: Commands) {
 }
 
 #[cfg(feature = "database")]
-async fn handle_scan_db(
+struct DbScanParams {
     db_type: String,
     connection: String,
     database: Option<String>,
@@ -416,11 +416,14 @@ async fn handle_scan_db(
     output: Option<std::path::PathBuf>,
     countries: Option<String>,
     no_progress: bool,
-) {
+}
+
+#[cfg(feature = "database")]
+async fn handle_scan_db(params: DbScanParams) {
     use std::str::FromStr;
 
     // Parse database type
-    let db_type = match DatabaseType::from_str(&db_type) {
+    let db_type = match DatabaseType::from_str(&params.db_type) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("❌ Error: {}", e);
@@ -430,10 +433,10 @@ async fn handle_scan_db(
     };
 
     // Extract or validate database name
-    let db_name = if let Some(name) = database {
+    let db_name = if let Some(name) = params.database {
         name
     } else {
-        match pii_radar::database::scanner::extract_database_name(&connection, db_type) {
+        match pii_radar::database::scanner::extract_database_name(&params.connection, db_type) {
             Some(name) => name,
             None => {
                 eprintln!("❌ Error: Database name required (use --database or include in connection string)");
@@ -445,7 +448,7 @@ async fn handle_scan_db(
     println!("🔗 Connecting to {} database: {}", db_type, db_name);
 
     // Build registry
-    let registry = if let Some(country_list) = countries {
+    let registry = if let Some(country_list) = params.countries {
         let codes: Vec<String> = country_list
             .split(',')
             .map(|s| s.trim().to_lowercase())
@@ -460,29 +463,29 @@ async fn handle_scan_db(
 
     // Build scan options
     let mut scan_options = ScanOptions::new();
-    scan_options.show_progress = !no_progress;
+    scan_options.show_progress = !params.no_progress;
 
-    if let Some(t) = tables {
+    if let Some(t) = params.tables {
         scan_options.include_tables = Some(t.split(',').map(|s| s.trim().to_string()).collect());
     }
 
-    if let Some(e) = exclude_tables {
+    if let Some(e) = params.exclude_tables {
         scan_options.exclude_tables = e.split(',').map(|s| s.trim().to_string()).collect();
     }
 
-    if let Some(c) = columns {
+    if let Some(c) = params.columns {
         scan_options.include_columns = Some(c.split(',').map(|s| s.trim().to_string()).collect());
     }
 
-    if let Some(e) = exclude_columns {
+    if let Some(e) = params.exclude_columns {
         scan_options.exclude_columns = e.split(',').map(|s| s.trim().to_string()).collect();
     }
 
-    scan_options.sample_percent = sample_percent;
-    scan_options.row_limit = row_limit;
+    scan_options.sample_percent = params.sample_percent;
+    scan_options.row_limit = params.row_limit;
 
     // Build database config
-    let config = DatabaseConfig::new(db_type, connection).with_pool_size(pool_size);
+    let config = DatabaseConfig::new(db_type, params.connection).with_pool_size(params.pool_size);
 
     // Create scanner
     let scanner = match DatabaseScanner::new(config, Some(&db_name), registry).await {
@@ -517,7 +520,7 @@ async fn handle_scan_db(
     println!("   Duration: {:.2}s", results.duration.as_secs_f64());
 
     // Output detailed results based on format
-    match format {
+    match params.format {
         OutputFormat::Terminal => {
             println!("\n📋 Detailed Results:");
             for table in &results.tables_scanned {
@@ -539,14 +542,14 @@ async fn handle_scan_db(
             }
         }
         OutputFormat::Json | OutputFormat::JsonCompact => {
-            let pretty = matches!(format, OutputFormat::Json);
+            let pretty = matches!(params.format, OutputFormat::Json);
             let json_str = if pretty {
                 serde_json::to_string_pretty(&results).unwrap()
             } else {
                 serde_json::to_string(&results).unwrap()
             };
 
-            if let Some(path) = output {
+            if let Some(path) = params.output {
                 if let Err(e) = std::fs::write(&path, json_str) {
                     eprintln!("❌ Error writing to file: {}", e);
                     process::exit(1);

@@ -232,6 +232,22 @@ fn default_plugin_dirs() -> Vec<PathBuf> {
     ]
 }
 
+/// CLI argument overrides for merging with config file
+#[derive(Debug, Default)]
+pub struct CliOverrides {
+    pub countries: Option<String>,
+    pub min_confidence: Option<String>,
+    pub extract_documents: bool,
+    pub no_context: bool,
+    pub threads: Option<usize>,
+    pub format: Option<String>,
+    pub output: Option<PathBuf>,
+    pub no_progress: bool,
+    pub full_paths: bool,
+    pub max_filesize: Option<u64>,
+    pub max_depth: Option<usize>,
+}
+
 impl Config {
     /// Load configuration from file
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -290,65 +306,52 @@ impl Config {
     }
 
     /// Merge CLI arguments with config file (CLI takes precedence)
-    pub fn merge_with_cli(
-        mut self,
-        countries: Option<&str>,
-        min_confidence: Option<&str>,
-        extract_documents: bool,
-        no_context: bool,
-        threads: Option<usize>,
-        format: Option<&str>,
-        output: Option<PathBuf>,
-        no_progress: bool,
-        full_paths: bool,
-        max_filesize: Option<u64>,
-        max_depth: Option<usize>,
-    ) -> Self {
+    pub fn merge_with_cli(mut self, overrides: CliOverrides) -> Self {
         // CLI overrides config file
-        if let Some(countries_str) = countries {
+        if let Some(countries_str) = overrides.countries {
             self.scan.countries = countries_str
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .collect();
         }
 
-        if let Some(confidence) = min_confidence {
-            self.scan.min_confidence = confidence.to_string();
+        if let Some(confidence) = overrides.min_confidence {
+            self.scan.min_confidence = confidence;
         }
 
-        if extract_documents {
+        if overrides.extract_documents {
             self.scan.extract_documents = true;
         }
 
-        if no_context {
+        if overrides.no_context {
             self.scan.no_context = true;
         }
 
-        if let Some(t) = threads {
+        if let Some(t) = overrides.threads {
             self.scan.max_threads = Some(t);
         }
 
-        if let Some(fmt) = format {
-            self.output.format = fmt.to_string();
+        if let Some(fmt) = overrides.format {
+            self.output.format = fmt;
         }
 
-        if let Some(out) = output {
+        if let Some(out) = overrides.output {
             self.output.output_path = Some(out);
         }
 
-        if no_progress {
+        if overrides.no_progress {
             self.output.no_progress = true;
         }
 
-        if full_paths {
+        if overrides.full_paths {
             self.output.full_paths = true;
         }
 
-        if let Some(size) = max_filesize {
+        if let Some(size) = overrides.max_filesize {
             self.filters.max_filesize_mb = size;
         }
 
-        if let Some(depth) = max_depth {
+        if let Some(depth) = overrides.max_depth {
             self.filters.max_depth = Some(depth);
         }
 
@@ -427,19 +430,19 @@ full_paths = true
     #[test]
     fn test_merge_with_cli() {
         let mut config = Config::default();
-        config = config.merge_with_cli(
-            Some("gb,fr"),
-            Some("low"),
-            true,
-            true,
-            Some(8),
-            Some("html"),
-            Some(PathBuf::from("output.html")),
-            true,
-            true,
-            Some(200),
-            Some(5),
-        );
+        config = config.merge_with_cli(CliOverrides {
+            countries: Some("gb,fr".to_string()),
+            min_confidence: Some("low".to_string()),
+            extract_documents: true,
+            no_context: true,
+            threads: Some(8),
+            format: Some("html".to_string()),
+            output: Some(PathBuf::from("output.html")),
+            no_progress: true,
+            full_paths: true,
+            max_filesize: Some(200),
+            max_depth: Some(5),
+        });
 
         assert_eq!(config.scan.countries, vec!["gb", "fr"]);
         assert_eq!(config.scan.min_confidence, "low");

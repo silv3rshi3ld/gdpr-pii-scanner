@@ -1,7 +1,8 @@
 // Performance benchmarks for PII-Radar
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use pii_radar::{default_registry, ScanEngine};
 use std::fs;
+use std::hint::black_box;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -134,7 +135,7 @@ fn bench_file_size_distribution(c: &mut Criterion) {
 
     // Many small files (100 files × 100 bytes)
     let small_temp = TempDir::new().unwrap();
-    let small_content = content_line.repeat(1);
+    let small_content = content_line.to_string();
     let _files = create_test_files(&small_temp, 100, &small_content);
 
     group.bench_function("one_large_file", |b| {
