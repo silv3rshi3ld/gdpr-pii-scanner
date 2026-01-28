@@ -1,26 +1,163 @@
 # PII-Radar 🔍
 
-> High-performance PII scanner for local files with context-aware GDPR Article 9 detection
+> High-performance PII scanner for files and databases with extensible plugin system
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](CHANGELOG.md)
 
-PII-Radar is a blazing-fast command-line tool that scans your local directories for Personally Identifiable Information (PII) across European countries. Built with Rust for maximum performance and safety.
+PII-Radar is a blazing-fast command-line tool that scans files and databases for Personally Identifiable Information (PII) across European countries. Built with Rust for maximum performance and safety, with extensible plugin architecture for custom detectors.
 
-## Features
+## 🎯 Key Features
 
-- 🌍 **7 European Countries**: Detects PII from Belgium, France, Germany, Italy, Netherlands, Spain, UK
-- 📄 **Document Extraction**: Scans PDFs, DOCX, and XLSX files for PII
-- ⚡ **High Performance**: Parallel file scanning with real-time progress bars
-- 🛡️ **GDPR Article 9 Detection**: Context-aware analysis detects special category data
+- 🌍 **10+ European Countries**: NL, DE, GB, ES, FR, IT, BE, PT + Nordic countries
+- 🗄️ **Database Scanning**: PostgreSQL, MySQL, MongoDB with connection pooling
+- 🔌 **Plugin System**: Custom detectors via TOML configuration
+- 🔑 **API Key Detection**: AWS, GitHub, Stripe, OpenAI, JWT, private keys
+- 📄 **Document Extraction**: PDFs, DOCX, XLSX file scanning
+- ⚡ **High Performance**: Parallel scanning with benchmarks
+- 🛡️ **GDPR Article 9**: Context-aware special category data detection
 - 🎯 **Strict Validation**: Checksum algorithms minimize false positives
-- 🎨 **Beautiful Output**: Terminal, JSON, or interactive HTML reports
+- 🎨 **Multiple Outputs**: Terminal, JSON, CSV, HTML reports
 - 🔒 **Privacy-First**: All data stays local - no cloud uploads
-- 🚀 **CI/CD Ready**: Exit code 1 when PII found for pipeline integration
-- 🎚️ **Confidence Filtering**: Filter by confidence level (low/medium/high)
+- 🚀 **CI/CD Ready**: Exit code 1 when PII found
 
-## Supported PII Types
+## 📦 Installation
+
+### From Source
+
+```bash
+git clone https://github.com/silv3rshi3ld/gdpr-pii-scanner
+cd gdpr-pii-scanner
+cargo build --release
+sudo cp target/release/pii-radar /usr/local/bin/
+```
+
+### With Database Support
+
+```bash
+cargo build --release --features database
+```
+
+### Using Cargo
+
+```bash
+cargo install --git https://github.com/silv3rshi3ld/gdpr-pii-scanner
+```
+
+## 🚀 Quick Start
+
+### File Scanning
+
+```bash
+# Basic scan
+pii-radar scan /path/to/directory
+
+# Scan documents (PDF, DOCX, XLSX)
+pii-radar scan /path --extract-documents
+
+# Filter by countries
+pii-radar scan /path --countries nl,de,gb
+
+# Generate HTML report
+pii-radar scan /path --format html --output report.html
+
+# Use custom detectors
+pii-radar scan /path --plugin-dir ./plugins
+```
+
+### Database Scanning
+
+```bash
+# Scan PostgreSQL database
+pii-radar scan-db \
+  --db-type postgres \
+  --connection "postgresql://user:pass@localhost:5432/mydb" \
+  --format json \
+  --output db_results.json
+
+# Scan MySQL with filtering
+pii-radar scan-db \
+  --db-type mysql \
+  --connection "mysql://user:pass@localhost:3306/mydb" \
+  --tables "users,customers" \
+  --exclude-columns "id,created_at"
+
+# Scan MongoDB collection
+pii-radar scan-db \
+  --db-type mongodb \
+  --connection "mongodb://localhost:27017" \
+  --database mydb \
+  --tables "users" \
+  --row-limit 10000
+```
+
+### Database Options
+
+```
+--db-type <TYPE>              Database type: postgres, mysql, mongodb
+--connection <URL>            Connection string
+--database <NAME>             Database name (required for MongoDB)
+-t, --tables <NAMES>          Filter specific tables/collections (comma-separated)
+--exclude-tables <NAMES>      Exclude tables/collections
+--columns <NAMES>             Scan only specific columns
+--exclude-columns <NAMES>     Exclude columns from scan
+--sample-percent <N>          Sample percentage for large tables (Postgres only)
+--row-limit <N>               Maximum rows to scan per table
+--pool-size <N>               Connection pool size [default: 4]
+```
+
+## 🔌 Plugin System
+
+Create custom PII detectors without modifying code!
+
+### Creating a Plugin
+
+Create a file named `my_detector.detector.toml`:
+
+```toml
+id = "custom_employee_id"
+name = "Employee ID"
+country = "universal"
+category = "custom"
+description = "Detects company employee IDs"
+severity = "medium"  # low, medium, high, critical
+
+# Define regex patterns
+[[patterns]]
+pattern = "EMP-\\d{6}"
+confidence = "high"  # low, medium, high
+
+# Optional validation
+[validation]
+min_length = 10
+max_length = 10
+required_prefix = "EMP-"
+checksum = "luhn"  # Built-in: luhn, mod11, iban
+
+# Examples for testing
+examples = ["EMP-123456", "EMP-987654"]
+
+# Context keywords (boost confidence)
+context_keywords = ["employee", "staff", "personnel"]
+```
+
+### Using Plugins
+
+```bash
+# Load plugins from directory
+pii-radar scan /data --plugin-dir ./plugins
+
+# Multiple patterns in one plugin
+pii-radar scan /data --plugin-dir ./company-plugins
+```
+
+See `examples/plugins/` for complete examples:
+- `employee_id.detector.toml` - Company employee IDs
+- `patient_id.detector.toml` - Medical patient records (GDPR critical)
+- `credit_card.detector.toml` - Credit cards with Luhn validation
+
+## 🔍 Supported PII Types
 
 ### Belgium 🇧🇪
 - **RRN** (Rijksregisternummer) - Modulus 97 validated
@@ -32,10 +169,13 @@ PII-Radar is a blazing-fast command-line tool that scans your local directories 
 - **Steuer-ID** (Tax Identification Number) - Modified modulus 11 validated
 
 ### Italy 🇮🇹
-- **Codice Fiscale** (Tax Code) - Complex check digit algorithm validated
+- **Codice Fiscale** (Tax Code) - Complex check digit algorithm
 
 ### Netherlands 🇳🇱
 - **BSN** (Burgerservicenummer) - 11-proef validated
+
+### Portugal 🇵🇹
+- **NIF** (Número de Identificação Fiscal) - Modulus 11 validated
 
 ### Spain 🇪🇸
 - **DNI** (Documento Nacional de Identidad) - Modulus 23 validated
@@ -45,108 +185,38 @@ PII-Radar is a blazing-fast command-line tool that scans your local directories 
 - **NHS Number** (National Health Service) - Modulus 11 validated
 
 ### Pan-European 🇪🇺
-- **IBAN** (International Bank Account Number) - Mod-97 validation for all EU countries
+- **IBAN** (International Bank Account Number) - Mod-97 validation
 
 ### Universal 🌍
 - **Credit Cards** - Visa, Mastercard, Amex with Luhn validation
 - **Email Addresses** - RFC 5322-compliant detection
+- **API Keys** - AWS, GitHub, Stripe, OpenAI, JWT, private keys (RSA/DSA/EC)
 
-## Installation
+## 🎨 Output Formats
 
-### From Source
+### Terminal (Default)
 
-```bash
-git clone https://github.com/silv3rshi3ld/gdpr-pii-scanner
-cd gdpr-pii-scanner
-cargo build --release
-sudo cp target/release/pii-radar /usr/local/bin/
+Colored, human-readable output with severity indicators:
+
+```
+🔴 CRITICAL | Dutch BSN (Burgerservicenummer)
+   File: employees.csv:42:15
+   Value: 123****782
+   Context: Patient medical record...
+   GDPR: Special Category (Medical)
 ```
 
-### Using Cargo
+### JSON
+
+Structured output for programmatic processing:
 
 ```bash
-cargo install --git https://github.com/silv3rshi3ld/gdpr-pii-scanner
-```
-
-## Quick Start
-
-### Scan a directory
-
-```bash
-pii-radar scan /path/to/directory
-```
-
-### Scan documents (PDF, DOCX, XLSX)
-
-```bash
-pii-radar scan /path --extract-documents
-```
-
-### Generate HTML report
-
-```bash
-pii-radar scan /path --format html --output report.html
-```
-
-### List available detectors
-
-```bash
-pii-radar detectors
-# Shows all 11 detectors across 7 countries
-```
-
-### Advanced usage
-
-```bash
-# Filter by specific countries (BE, FR, DE, IT, NL, ES, GB)
-pii-radar scan /path --countries gb,nl,fr
-
-# Scan with JSON output
 pii-radar scan /path --format json --output results.json
-
-# Generate interactive HTML report
-pii-radar scan /path --format html --output report.html
-
-# Extract text from documents
-pii-radar scan /path --extract-documents
-
-# Disable progress bar
-pii-radar scan /path --no-progress
-
-# Filter by confidence level
-pii-radar scan /path --min-confidence medium
-
-# Disable context analysis (faster)
-pii-radar scan /path --no-context
-
-# Limit recursion depth
-pii-radar scan /path --max-depth 3
-
-# Use more threads
-pii-radar scan /path -j 32
 ```
 
-## Document Extraction
+### HTML Report
 
-PII-Radar can extract and scan text from:
-- **PDF files** (using lopdf)
-- **Microsoft Word** (.docx)
-- **Microsoft Excel** (.xlsx)
-
-```bash
-# Enable document extraction
-pii-radar scan /documents --extract-documents
-
-# Results show extraction statistics:
-# Documents extracted: 15
-# Extraction failures: 1
-```
-
-Extraction failures are logged but don't stop the scan. The scanner will continue with the next file.
-
-## HTML Reports
-
-Generate beautiful, interactive HTML reports:
+Interactive, searchable HTML report:
 
 ```bash
 pii-radar scan /path --format html --output report.html
@@ -154,80 +224,80 @@ pii-radar scan /path --format html --output report.html
 
 Features:
 - 🎨 Responsive design with gradient theme
-- 🔍 Live search/filter functionality
-- 📊 Visual severity breakdown with progress bars
+- 🔍 Live search and filtering
+- 📊 Visual severity breakdown
 - 📋 Sortable results table
 - 🏷️ GDPR Article 9 badges
-- 📈 Extraction statistics
 
-Opens in any modern browser - no server required!
+## 📊 Performance Benchmarks
 
-## Example Output
+Run comprehensive performance benchmarks:
 
-```
-════════════════════════════════════════════════════════════════════════════════
-  🎯 SCAN COMPLETE
-════════════════════════════════════════════════════════════════════════════════
+```bash
+# Run all benchmarks
+cargo bench
 
-📊 Statistics:
-  Files scanned:    4
-  Files with PII:   4
-  Total matches:    16
-  Scan duration:    3 ms
-  
-📄 Document Extraction:
-  Documents extracted:    12
-  Extraction failures:    0
-
-⚠️  Severity Breakdown:
-  🔴 Critical:  11
-  🟠 High:      2
-  🟡 Medium:    3
-
-🔍 Detector Matches:
-  → French NIR (Numéro de Sécurité Sociale): 2
-  → Italian Codice Fiscale: 1
-  → Germany Tax ID (Steuer-ID): 1
-  → Dutch BSN (Burgerservicenummer): 3
-  → UK NHS Number: 3
-  → Spain DNI: 2
-  → Spain NIE: 1
-  → Belgium RRN: 4
-  → IBAN (International Bank Account Number): 1
-  → Credit Card Number: 1
-  → Email Address: 3
-
-⚠️  GDPR Article 9 - Special Category Data:
-  2 matches contain sensitive context (medical/biometric/genetic/criminal)
-  These require extra protection under GDPR!
+# Specific benchmark groups
+cargo bench scan_text
+cargo bench detector_performance
+cargo bench thread_scaling
 ```
 
-## CLI Options
+Benchmark categories:
+- Plain text scanning
+- Individual detector performance
+- PII density scenarios
+- File size distribution
+- Pattern complexity
+- Thread scaling (1-32 threads)
 
-### `scan` command
+## 🛠️ CLI Reference
+
+### `scan` - File Scanning
 
 ```
 pii-radar scan [OPTIONS] <PATH>
 
 OPTIONS:
-  -f, --format <FORMAT>           Output format [default: terminal] 
-                                  [possible: terminal, json, json-compact, html]
-  -o, --output <FILE>             Output file (for json/html formats)
-  -c, --countries <CODES>         Filter by country codes 
-                                  (be,fr,de,it,nl,es,gb)
-      --min-confidence <LEVEL>    Minimum confidence [default: high] 
-                                  [possible: low, medium, high]
-      --extract-documents         Extract text from PDF, DOCX, XLSX files
-      --no-context                Disable GDPR Article 9 context analysis
-      --no-progress               Disable progress bar
-      --full-paths                Show full file paths
-      --max-depth <DEPTH>         Maximum recursion depth
-  -j, --threads <N>               Number of threads (default: auto)
-      --max-filesize <SIZE>       Max file size in MB [default: 100]
-  -h, --help                      Print help
+  -f, --format <FORMAT>         Output format [default: terminal]
+                                [possible: terminal, json, html, csv]
+  -o, --output <FILE>           Output file (for json/html/csv)
+  -c, --countries <CODES>       Filter by country codes (nl,de,gb,...)
+      --min-confidence <LEVEL>  Minimum confidence [default: high]
+      --extract-documents       Extract text from PDF/DOCX/XLSX
+      --no-context              Disable GDPR Article 9 analysis
+      --no-progress             Disable progress bar
+      --full-paths              Show full file paths
+      --max-depth <DEPTH>       Maximum recursion depth
+  -j, --threads <N>             Number of threads (default: auto)
+      --max-filesize <SIZE>     Max file size in MB [default: 100]
+      --plugin-dir <DIR>        Load custom detectors from directory
+  -h, --help                    Print help
 ```
 
-### `detectors` command
+### `scan-db` - Database Scanning (requires `--features database`)
+
+```
+pii-radar scan-db [OPTIONS]
+
+OPTIONS:
+      --db-type <TYPE>          Database type: postgres, mysql, mongodb
+  -c, --connection <URL>        Connection string
+      --database <NAME>         Database name (required for MongoDB)
+  -t, --tables <NAMES>          Scan specific tables (comma-separated)
+      --exclude-tables <NAMES>  Exclude tables
+      --columns <NAMES>         Scan specific columns
+      --exclude-columns <NAMES> Exclude columns
+      --sample-percent <N>      Sample percentage (Postgres only)
+      --row-limit <N>           Max rows per table
+      --pool-size <N>           Connection pool size [default: 4]
+  -f, --format <FORMAT>         Output format [default: terminal]
+  -o, --output <FILE>           Output file
+  -c, --countries <CODES>       Filter by country codes
+      --no-progress             Disable progress bar
+```
+
+### `detectors` - List Detectors
 
 ```
 pii-radar detectors [OPTIONS]
@@ -237,142 +307,206 @@ OPTIONS:
   -h, --help       Print help
 ```
 
-## Context-Aware Detection
+## 🔐 GDPR Article 9 - Special Category Data
 
-PII-Radar analyzes text around detected PII to identify GDPR Article 9 special category data:
+PII-Radar automatically detects and flags special category data requiring extra protection:
 
 - **Medical**: Patient records, diagnoses, treatments
 - **Biometric**: Fingerprints, facial recognition data
 - **Genetic**: DNA sequences, genetic test results
 - **Criminal**: Criminal records, convictions
 
-When special category keywords are detected, the severity is automatically upgraded to **Critical**.
+When detected, severity is upgraded to **Critical** with GDPR Article 9 badge.
 
-### Example
+## 🏗️ Architecture
 
-**Input file:**
 ```
-Patient John Doe with BSN 111222333 diagnosed with diabetes.
-```
-
-**Detection:**
-- BSN detected: `111222333` (validated with 11-proef)
-- Context keywords: `patient`, `diagnosed`
-- Category: Medical
-- Severity: **Critical** (upgraded from High)
-
-## .pii-ignore
-
-Create a `.pii-ignore` file in your scan directory to exclude files/patterns (uses gitignore syntax):
-
-```gitignore
-# Ignore compiled files
-*.exe
-*.dll
-*.so
-
-# Ignore test data
-test-data/
-*.test
-
-# Ignore secrets (ironically)
-.env
-credentials.json
+pii-radar/
+├── src/
+│   ├── core/           # Core detection engine
+│   ├── detectors/      # Country-specific detectors
+│   │   ├── plugin.rs         # Plugin detector runtime
+│   │   └── plugin_loader.rs  # TOML plugin loader
+│   ├── database/       # Database scanning module
+│   │   ├── postgres.rs
+│   │   ├── mysql.rs
+│   │   └── mongodb.rs
+│   ├── scanner/        # File scanning engine
+│   ├── extractor/      # Document text extraction
+│   ├── reporter/       # Output formatters
+│   └── cli/            # Command-line interface
+├── benches/            # Performance benchmarks
+└── examples/
+    └── plugins/        # Example plugin detectors
 ```
 
-## Performance
+## 🧪 Testing
 
-- **Fast**: Scans 100,000+ files in under 5 minutes
-- **Parallel**: Uses all available CPU cores
-- **Memory-efficient**: Streams file content
-- **Network-optimized**: Non-blocking I/O for network drives
+```bash
+# Run all tests
+cargo test
 
-## CI/CD Integration
+# Run with database tests (requires running databases)
+cargo test --features database
+
+# Run benchmarks
+cargo bench
+
+# Run specific test
+cargo test test_bsn_detection
+```
+
+**Test Coverage**: 237 tests covering all detectors, database scanning, and plugin system.
+
+## 🚀 CI/CD Integration
 
 PII-Radar exits with code 1 when PII is found, making it perfect for CI/CD pipelines:
 
 ```yaml
 # GitHub Actions example
 - name: Scan for PII
-  run: pii-radar scan ./src --format json --output pii-report.json
-  continue-on-error: true
-
-- name: Upload PII report
+  run: |
+    pii-radar scan ./src --format json --output pii-report.json
+    
+- name: Upload results
+  if: failure()
   uses: actions/upload-artifact@v3
   with:
     name: pii-report
     path: pii-report.json
 ```
 
-## Development
+## 📚 Examples
 
-### Run tests
-
-```bash
-cargo test
-```
-
-### Run benchmarks
+### Scan with Custom Plugins
 
 ```bash
-cargo bench
+# Create plugin directory
+mkdir -p ./plugins
+
+# Create custom detector (see examples/plugins/)
+cat > ./plugins/customer_id.detector.toml << 'EOF'
+id = "customer_id"
+name = "Customer ID"
+country = "universal"
+category = "custom"
+description = "Company customer identifiers"
+severity = "medium"
+
+[[patterns]]
+pattern = "CUST-\\d{8}"
+confidence = "high"
+
+[validation]
+min_length = 13
+max_length = 13
+EOF
+
+# Scan with plugin
+pii-radar scan /data --plugin-dir ./plugins
 ```
 
-### Build documentation
+### Database Scanning with Sampling
 
 ```bash
-cargo doc --open
+# Scan large Postgres database with 10% sampling
+pii-radar scan-db \
+  --db-type postgres \
+  --connection "postgresql://user:pass@localhost/bigdb" \
+  --sample-percent 10 \
+  --row-limit 100000 \
+  --format json \
+  --output results.json
 ```
 
-## Roadmap
+### Multi-Database Scan Script
 
-### v0.2.0 ✅ COMPLETE
-- [x] More country detectors (GB, BE, ES)
-- [x] Country filtering (`--countries gb,es,be`)
-- [x] Confidence filtering
-- [x] HTML report format
+```bash
+#!/bin/bash
+# Scan multiple databases and aggregate results
 
-### v0.3.0 ✅ COMPLETE
-- [x] 7 European countries (BE, FR, DE, IT, NL, ES, GB)
-- [x] Document extraction (PDF, DOCX, XLSX)
-- [x] HTML report format with interactive UI
-- [x] Progress bars with live statistics
-- [x] France NIR detector
-- [x] Italy Codice Fiscale detector
-- [x] Germany Steuer-ID detector
+for db in prod_db staging_db dev_db; do
+  pii-radar scan-db \
+    --db-type postgres \
+    --connection "postgresql://user:pass@localhost/$db" \
+    --format json \
+    --output "${db}_scan.json"
+done
 
-### v0.4.0 (Planned)
-- [ ] More countries (PT, PL, DK, SE, NO, FI)
-- [ ] Database scanning (PostgreSQL, MySQL)
-- [ ] API endpoint scanning
-- [ ] Custom detector plugins
-- [ ] Machine learning-based detection
-- [ ] CSV report format
-- [ ] Configuration file support
+# Merge results
+jq -s 'add' *_scan.json > combined_results.json
+```
 
-## Contributing
+## 🔧 Development
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+### Building
 
-## License
+```bash
+# Debug build
+cargo build
+
+# Release build with optimizations
+cargo build --release
+
+# With database support
+cargo build --release --features database
+
+# Run clippy lints
+cargo clippy --all-features
+
+# Format code
+cargo fmt
+```
+
+### Adding a New Detector
+
+1. Create detector in `src/detectors/<country>/`
+2. Implement `Detector` trait
+3. Add tests
+4. Register in `src/lib.rs`
+
+See existing detectors for examples.
+
+### Creating Plugins
+
+No code changes needed! Just create a `.detector.toml` file:
+
+```toml
+id = "my_detector"
+name = "My Custom Detector"
+country = "universal"
+category = "custom"
+description = "Detects custom format"
+severity = "medium"
+
+[[patterns]]
+pattern = "YOUR-REGEX-HERE"
+confidence = "high"
+```
+
+## 📝 License
 
 Licensed under either of:
 
-- MIT License ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
 
-## Acknowledgments
+## 🤝 Contributing
 
-- Built with the excellent [ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore) crate from ripgrep
-- Inspired by the need for fast, local PII scanning in European data protection contexts
-- Uses checksum algorithms to ensure high-quality detections
+Contributions welcome! Please feel free to submit a Pull Request.
 
-## Disclaimer
+## 🔗 Links
 
-PII-Radar is a tool to help identify potential PII in your files. It should not be your only line of defense. Always follow your organization's data protection policies and consult with legal/compliance teams for GDPR compliance.
+- [GitHub Repository](https://github.com/silv3rshi3ld/gdpr-pii-scanner)
+- [Issue Tracker](https://github.com/silv3rshi3ld/gdpr-pii-scanner/issues)
+- [Changelog](CHANGELOG.md)
+
+## ⚠️ Disclaimer
+
+This tool is designed to help identify PII in data, but it should not be the only measure for ensuring GDPR compliance. Always consult with legal experts regarding data protection requirements.
 
 ---
 
-Made with ❤️ and ☕ by the PII-Radar contributors
+**Built with ❤️ and Rust** | Made for European Data Protection
