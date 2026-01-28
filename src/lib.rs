@@ -11,6 +11,9 @@ pub mod reporter;
 pub mod scanner;
 pub mod utils;
 
+#[cfg(feature = "database")]
+pub mod database;
+
 // Re-export commonly used types
 pub use core::{
     Confidence, ContextAnalyzer, Detector, DetectorRegistry, FileResult, GdprCategory, Match,
@@ -70,6 +73,9 @@ pub fn default_registry() -> DetectorRegistry {
 
     // Universal personal detectors
     registry.register(Box::new(detectors::personal::EmailDetector::new()));
+
+    // Universal security detectors
+    registry.register(Box::new(detectors::security::ApiKeyDetector::new()));
 
     registry
 }
@@ -132,12 +138,18 @@ pub fn registry_for_countries(countries: Vec<String>) -> DetectorRegistry {
         registry.register(Box::new(detectors::gb::NhsDetector::new()));
     }
 
+    // Portugal
+    if should_include("pt") {
+        registry.register(Box::new(detectors::pt::NifDetector::new()));
+    }
+
     // Always include Pan-European detectors
     registry.register(Box::new(detectors::eu::IbanDetector::new()));
 
     // Always include Universal detectors
     registry.register(Box::new(detectors::financial::CreditCardDetector::new()));
     registry.register(Box::new(detectors::personal::EmailDetector::new()));
+    registry.register(Box::new(detectors::security::ApiKeyDetector::new()));
 
     registry
 }

@@ -59,10 +59,8 @@ impl Walker {
             .build();
 
         for entry in walker {
-            if let Some(path) = self.process_entry(entry) {
-                if let Ok(p) = path {
-                    files.push(p);
-                }
+            if let Some(Ok(p)) = self.process_entry(entry) {
+                files.push(p);
             }
         }
 
@@ -81,10 +79,8 @@ impl Walker {
             .build();
 
         for entry in walker {
-            if let Some(path) = self.process_entry(entry) {
-                if let Ok(p) = path {
-                    files.push(p);
-                }
+            if let Some(Ok(p)) = self.process_entry(entry) {
+                files.push(p);
             }
         }
 

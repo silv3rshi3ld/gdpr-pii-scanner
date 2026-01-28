@@ -8,10 +8,62 @@ use pii_radar::{
 use std::process;
 use std::sync::Arc;
 
+#[cfg(feature = "database")]
+use pii_radar::database::{DatabaseConfig, DatabaseScanner, DatabaseType, ScanOptions};
+
+#[cfg(feature = "database")]
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::ScanDb {
+            db_type,
+            connection,
+            database,
+            tables,
+            exclude_tables,
+            columns,
+            exclude_columns,
+            sample_percent,
+            row_limit,
+            pool_size,
+            format,
+            output,
+            countries,
+            no_progress,
+        } => {
+            handle_scan_db(
+                db_type,
+                connection,
+                database,
+                tables,
+                exclude_tables,
+                columns,
+                exclude_columns,
+                sample_percent,
+                row_limit,
+                pool_size,
+                format,
+                output,
+                countries,
+                no_progress,
+            )
+            .await;
+        }
+        _ => {
+            handle_file_commands(cli.command);
+        }
+    }
+}
+
+#[cfg(not(feature = "database"))]
 fn main() {
     let cli = Cli::parse();
+    handle_file_commands(cli.command);
+}
 
-    match cli.command {
+fn handle_file_commands(command: Commands) {
+    match command {
         Commands::Scan {
             directory,
             format,
@@ -25,6 +77,7 @@ fn main() {
             max_depth,
             threads,
             max_filesize,
+            plugin_dir,
         } => {
             // Validate directory
             if !directory.exists() {
@@ -41,7 +94,7 @@ fn main() {
             }
 
             // Build registry (with optional country filtering)
-            let registry = if let Some(country_list) = countries {
+            let mut registry = if let Some(country_list) = countries {
                 let codes: Vec<String> = country_list
                     .split(',')
                     .map(|s| s.trim().to_lowercase())
@@ -52,6 +105,24 @@ fn main() {
             } else {
                 default_registry()
             };
+
+            // Load plugin detectors if plugin_dir is specified
+            if let Some(ref plugin_path) = plugin_dir {
+                use pii_radar::detectors::plugin_loader::load_plugins_from_directory;
+                
+                println!("🔌 Loading plugins from: {}", plugin_path.display());
+                match load_plugins_from_directory(plugin_path) {
+                    Ok(plugins) => {
+                        println!("✓ Loaded {} custom detector(s)\n", plugins.len());
+                        for plugin in plugins {
+                            registry.register(Box::new(plugin));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠ Warning: Failed to load plugins: {}", e);
+                    }
+                }
+            }
 
             println!("🔍 Using {} detectors\n", registry.all().len());
 
@@ -157,5 +228,173 @@ fn main() {
 
             println!();
         }
+
+        #[cfg(feature = "database")]
+        Commands::ScanDb { .. } => {
+            // This should be handled in the async main function
+            unreachable!("ScanDb should be handled in async main");
+        }
+    }
+}
+
+#[cfg(feature = "database")]
+async fn handle_scan_db(
+    db_type: String,
+    connection: String,
+    database: Option<String>,
+    tables: Option<String>,
+    exclude_tables: Option<String>,
+    columns: Option<String>,
+    exclude_columns: Option<String>,
+    sample_percent: Option<u8>,
+    row_limit: Option<usize>,
+    pool_size: u32,
+    format: OutputFormat,
+    output: Option<std::path::PathBuf>,
+    countries: Option<String>,
+    no_progress: bool,
+) {
+    use std::str::FromStr;
+
+    // Parse database type
+    let db_type = match DatabaseType::from_str(&db_type) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("❌ Error: {}", e);
+            eprintln!("Supported types: postgres, mysql, mongodb");
+            process::exit(1);
+        }
+    };
+
+    // Extract or validate database name
+    let db_name = if let Some(name) = database {
+        name
+    } else {
+        match pii_radar::database::scanner::extract_database_name(&connection, db_type) {
+            Some(name) => name,
+            None => {
+                eprintln!("❌ Error: Database name required (use --database or include in connection string)");
+                process::exit(1);
+            }
+        }
+    };
+
+    println!("🔗 Connecting to {} database: {}", db_type, db_name);
+
+    // Build registry
+    let registry = if let Some(country_list) = countries {
+        let codes: Vec<String> = country_list
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .collect();
+        println!("🌍 Filtering detectors for countries: {:?}", codes);
+        registry_for_countries(codes)
+    } else {
+        default_registry()
+    };
+
+    println!("🔍 Using {} detectors\n", registry.all().len());
+
+    // Build scan options
+    let mut scan_options = ScanOptions::new();
+    scan_options.show_progress = !no_progress;
+    
+    if let Some(t) = tables {
+        scan_options.include_tables = Some(t.split(',').map(|s| s.trim().to_string()).collect());
+    }
+    
+    if let Some(e) = exclude_tables {
+        scan_options.exclude_tables = e.split(',').map(|s| s.trim().to_string()).collect();
+    }
+    
+    if let Some(c) = columns {
+        scan_options.include_columns = Some(c.split(',').map(|s| s.trim().to_string()).collect());
+    }
+    
+    if let Some(e) = exclude_columns {
+        scan_options.exclude_columns = e.split(',').map(|s| s.trim().to_string()).collect();
+    }
+    
+    scan_options.sample_percent = sample_percent;
+    scan_options.row_limit = row_limit;
+
+    // Build database config
+    let config = DatabaseConfig::new(db_type, connection)
+        .with_pool_size(pool_size);
+
+    // Create scanner
+    let scanner = match DatabaseScanner::new(config, Some(&db_name), registry).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("❌ Error connecting to database: {}", e);
+            process::exit(1);
+        }
+    };
+
+    println!("✅ Connected successfully\n");
+
+    // Scan database
+    println!("🔍 Scanning database...\n");
+    let results = match scanner.scan(&db_name, &scan_options).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("❌ Error scanning database: {}", e);
+            process::exit(1);
+        }
+    };
+
+    // Print summary
+    println!("\n📊 Scan Summary:");
+    println!("   Database: {} ({})", results.database_name, results.database_type);
+    println!("   Tables/Collections: {}", results.tables_scanned.len());
+    println!("   Total Rows: {}", results.total_rows);
+    println!("   Total Matches: {}", results.total_matches);
+    println!("   Duration: {:.2}s", results.duration.as_secs_f64());
+
+    // Output detailed results based on format
+    match format {
+        OutputFormat::Terminal => {
+            println!("\n📋 Detailed Results:");
+            for table in &results.tables_scanned {
+                if table.matches_found > 0 {
+                    println!("\n🗂️  {} ({} matches in {} rows):", table.name, table.matches_found, table.rows_scanned);
+                    for m in &table.matches {
+                        println!("   ⚠️  {} - {} (Line: {}, Column: {})", 
+                            m.detector_name, 
+                            m.value_masked,
+                            m.location.line,
+                            m.location.file_path.display()
+                        );
+                    }
+                }
+            }
+        }
+        OutputFormat::Json | OutputFormat::JsonCompact => {
+            let pretty = matches!(format, OutputFormat::Json);
+            let json_str = if pretty {
+                serde_json::to_string_pretty(&results).unwrap()
+            } else {
+                serde_json::to_string(&results).unwrap()
+            };
+
+            if let Some(path) = output {
+                if let Err(e) = std::fs::write(&path, json_str) {
+                    eprintln!("❌ Error writing to file: {}", e);
+                    process::exit(1);
+                }
+                println!("\n✅ Results written to: {}", path.display());
+            } else {
+                println!("\n{}", json_str);
+            }
+        }
+        OutputFormat::Html => {
+            eprintln!("❌ HTML output format not yet implemented for database scans");
+            process::exit(1);
+        }
+    }
+
+    // Exit code 1 if PII found (for CI/CD)
+    if results.total_matches > 0 {
+        process::exit(1);
     }
 }

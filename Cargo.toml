@@ -34,6 +34,7 @@ walkdir = "2.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 csv = "1.3"
+toml = "0.8"
 
 # Templating & Time
 tera = "1.19"
@@ -57,9 +58,19 @@ base64 = "0.22"
 # Entropy berekening
 ordered-float = "4.2"
 
+# Database connectivity (optional feature for database scanning)
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "mysql", "sqlite"], optional = true }
+mongodb = { version = "2.8", optional = true }
+tokio = { version = "1.35", features = ["full"], optional = true }
+futures = { version = "0.3", optional = true }
+
 # Logging
 log = "0.4"
 env_logger = "0.11"
+
+[features]
+default = []
+database = ["sqlx", "mongodb", "tokio", "futures"]
 
 [dev-dependencies]
 criterion = "0.5"

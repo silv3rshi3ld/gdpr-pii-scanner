@@ -8,6 +8,8 @@ pub mod gb; // United Kingdom
 pub mod it; // Italy
 pub mod nl; // Netherlands
 pub mod personal; // Universal personal
+pub mod plugin; // Plugin system for custom detectors
+pub mod plugin_loader; // Plugin loader utilities
 pub mod pt; // Portugal
 pub mod security; // Universal security
 

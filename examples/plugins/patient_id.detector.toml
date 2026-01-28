@@ -1,0 +1,46 @@
+# Custom Patient ID Detector
+#
+# Example plugin for healthcare/medical patient identifiers
+
+id = "custom_patient_id"
+name = "Patient ID"
+country = "universal"
+category = "medical"
+description = "Detects medical patient identification numbers"
+severity = "critical"  # Medical data is critical under GDPR
+
+[[patterns]]
+pattern = "PAT-\\d{8}"
+confidence = "high"
+description = "Standard patient ID format (PAT-12345678)"
+
+[[patterns]]
+pattern = "MRN[:-]?\\d{6,10}"
+confidence = "high"
+description = "Medical Record Number"
+
+[[patterns]]
+pattern = "PATIENT\\s+(?:ID|NUMBER)[:-]?\\s*\\d{6,10}"
+confidence = "medium"
+description = "Patient ID with label"
+
+[validation]
+min_length = 6
+max_length = 25
+
+examples = [
+    "PAT-12345678",
+    "MRN:9876543",
+    "MRN-123456789",
+    "PATIENT ID: 456789"
+]
+
+context_keywords = [
+    "patient",
+    "medical",
+    "hospital",
+    "clinic",
+    "healthcare",
+    "diagnosis",
+    "treatment"
+]

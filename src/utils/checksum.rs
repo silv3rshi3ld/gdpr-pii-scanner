@@ -5,7 +5,6 @@
 /// - Luhn algoritme (creditcards)
 /// - IBAN modulo-97 validatie
 /// - Modulo-10 en modulo-11 checksums
-
 /// Valideert een Nederlands BSN (Burgerservicenummer) met de 11-proef
 ///
 /// De 11-proef is een checksum algoritme waarbij elk cijfer wordt vermenigvuldigd
