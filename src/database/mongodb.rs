@@ -39,7 +39,7 @@ impl MongoScanner {
     async fn get_collections(&self) -> Result<Vec<String>> {
         let collections = self
             .db
-            .list_collection_names(None)
+            .list_collection_names()
             .await
             .context("Failed to list collections")?;
 
@@ -57,18 +57,17 @@ impl MongoScanner {
 
         let coll = self.db.collection::<Document>(collection);
 
-        // Build query options
-        let mut find_options = mongodb::options::FindOptions::default();
-
-        if let Some(limit) = options.row_limit {
-            find_options.limit = Some(limit as i64);
-        }
-
-        // Execute query
-        let mut cursor = coll
-            .find(None, find_options)
-            .await
-            .context(format!("Failed to query collection {}", collection))?;
+        // Execute query with fluent API (MongoDB 3.x)
+        let mut cursor = if let Some(limit) = options.row_limit {
+            coll.find(Document::new())
+                .limit(limit as i64)
+                .await
+                .context(format!("Failed to query collection {}", collection))?
+        } else {
+            coll.find(Document::new())
+                .await
+                .context(format!("Failed to query collection {}", collection))?
+        };
 
         let mut doc_count = 0;
 
