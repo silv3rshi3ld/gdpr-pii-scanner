@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-28
+
+### 🔒 Security (BREAKING CHANGES)
+
+- **BREAKING**: Removed MySQL/MariaDB database scanning support
+  - Reason: Eliminates RUSTSEC-2023-0071 (rsa crate Marvin Attack vulnerability)
+  - No fix available from upstream maintainers
+  - Migration paths: PostgreSQL (recommended) or MongoDB
+  - See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed migration instructions
+  
+- Fixed RUSTSEC-2024-0363 (sqlx binary protocol vulnerability)
+- Fixed RUSTSEC-2024-0421 (idna Punycode labels vulnerability)
+- **Zero security vulnerabilities** (verified with `cargo audit`)
+
+### ✨ Added
+
+- SQLite support added to `DatabaseType` enum (implementation coming in v0.5.1)
+- Migration guide for MySQL → PostgreSQL/MongoDB transitions
+
+### 🐛 Fixed
+
+- Re-enabled XLSX extraction by updating `zip` crate to 4.2
+  - Resolves compatibility with `calamine 0.32`
+  - All Excel formats working: .xlsx, .xlsm, .xlsb, .xls
+- Resolved all 11 clippy linter warnings across 8 files
+  - Refactored functions with excessive parameters using structs (`CliOverrides`, `DbScanParams`)
+  - Replaced manual modulo checks with `.is_multiple_of()` method
+  - Fixed redundant closures and needless borrows
+- Updated MongoDB driver for 3.x fluent API syntax
+
+### ⬆️ Dependencies
+
+- **sqlx**: 0.7.4 → 0.8.6 (security fixes)
+- **mongodb**: 2.8.2 → 3.5.0 (security + API improvements)
+- **reqwest**: 0.12.28 → 0.13.1
+- **toml**: 0.8.23 → 0.9.11
+- **dirs**: 5.0.1 → 6.0.0
+- **zip**: 0.6 → 4.2 (re-enabled XLSX)
+
+### 💔 Breaking Changes
+
+**MySQL/MariaDB Removal:**
+- CLI flag `--db-type mysql` no longer accepted
+- Connection strings starting with `mysql://` not supported
+- Affected users: See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
+
+**Recommended alternatives:**
+- **PostgreSQL**: Most SQL-compatible, recommended for relational data
+- **MongoDB**: NoSQL alternative for flexible schema requirements
+
+### 📝 Documentation
+
+- Confirmed CSV reporter is feature-complete
+- Updated all code examples to remove MySQL references
+
 ## [0.4.0] - 2026-01-28
 
 ### 🐛 Bug Fixes (2026-01-28)

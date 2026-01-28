@@ -4,14 +4,14 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0-green.svg)](CHANGELOG.md)
 
 PII-Radar is a blazing-fast command-line tool that scans files and databases for Personally Identifiable Information (PII) across European countries. Built with Rust for maximum performance and safety, with extensible plugin architecture for custom detectors.
 
 ## 🎯 Key Features
 
 - 🌍 **10+ European Countries**: NL, DE, GB, ES, FR, IT, BE, PT + Nordic countries
-- 🗄️ **Database Scanning**: PostgreSQL, MySQL, MongoDB with connection pooling
+- 🗄️ **Database Scanning**: PostgreSQL, MongoDB with connection pooling
 - 🔌 **Plugin System**: Custom detectors via TOML configuration
 - 🔑 **API Key Detection**: AWS, GitHub, Stripe, OpenAI, JWT, private keys
 - 📄 **Document Extraction**: PDFs, DOCX, XLSX file scanning
@@ -76,13 +76,6 @@ pii-radar scan-db \
   --format json \
   --output db_results.json
 
-# Scan MySQL with filtering
-pii-radar scan-db \
-  --db-type mysql \
-  --connection "mysql://user:pass@localhost:3306/mydb" \
-  --tables "users,customers" \
-  --exclude-columns "id,created_at"
-
 # Scan MongoDB collection
 pii-radar scan-db \
   --db-type mongodb \
@@ -95,7 +88,7 @@ pii-radar scan-db \
 ### Database Options
 
 ```
---db-type <TYPE>              Database type: postgres, mysql, mongodb
+--db-type <TYPE>              Database type: postgres, mongodb
 --connection <URL>            Connection string
 --database <NAME>             Database name (required for MongoDB)
 -t, --tables <NAMES>          Filter specific tables/collections (comma-separated)
