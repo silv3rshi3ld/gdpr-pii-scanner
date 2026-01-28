@@ -237,7 +237,7 @@ pub fn scan_api_endpoints(
         }
     }
 
-    let scan_duration = start_time.elapsed();
+    let _scan_duration = start_time.elapsed();
 
     Ok(ScanResults {
         total_files: endpoints.len(),

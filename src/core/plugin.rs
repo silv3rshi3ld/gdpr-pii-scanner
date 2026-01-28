@@ -20,7 +20,6 @@
 /// checksum = "none"
 /// ```
 use crate::core::{Confidence, Detector, Match, Severity};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
 use std::fs;

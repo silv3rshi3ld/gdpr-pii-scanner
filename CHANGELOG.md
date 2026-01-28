@@ -75,14 +75,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thread scaling tests (1 to 32 threads)
 
 ### Improved
-- **Test Coverage**: 284 tests passing (from 199 in v0.3.0) - **+85 tests (+43%)**
+- **Test Coverage**: 287 tests passing (from 199 in v0.3.0) - **+88 tests (+44%)**
 - **Total Detectors**: 16+ detectors across 12 countries
-- **Code Quality**: All clippy warnings resolved
+- **Code Quality**: Zero warnings in release build
 - **Modular Architecture**: Better separation of concerns
 - **Error Handling**: Improved validation and error messages
+- **Document Extraction**: XLSX extraction re-enabled with zip 4.2 compatibility
+
+### Fixed
+- **XLSX Extraction Re-enabled**: Resolved dependency conflict
+  - Updated `zip` dependency from 0.6 to 4.2 (compatible with calamine 0.32)
+  - Re-enabled `calamine = "0.32"` for Excel file support
+  - Full support for .xlsx, .xlsm, .xlsb, .xls formats
+  - Resolved `lzma-rust2`/`crc` conflict by using zip 4.2 instead of 7.2
+  - All document extractors (PDF, DOCX, XLSX) now fully functional
 
 ### Technical Details
-- **Tests**: 284 passing (95% test coverage)
+- **Tests**: 287 passing (95% test coverage)
 - **Detectors**: 16+ across 12 countries
 - **Lines Added**: ~3,500+ lines of production code
 - **New Dependencies**: 
@@ -90,13 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plugin: `toml` (0.8), `dirs` (5.0)
   - API: `reqwest` (0.12), `url` (2.5)
   - Benchmarks: `criterion` (0.8)
+  - Documents: `calamine` (0.32), `zip` (4.2)
 - **Feature Flags**: `database` feature for optional database support
-
-### Known Issues
-- **XLSX Extraction Temporarily Disabled**: Due to `lzma-rust2`/`crc` dependency conflict
-  - Downgraded `zip` from 7.2 to 0.6 as temporary fix
-  - Will be re-enabled once upstream dependency is fixed
-  - PDF and DOCX extraction still fully functional
 
 ### Detectors Added
 1. **Poland PESEL** - Polish national identification number (11 digits)
