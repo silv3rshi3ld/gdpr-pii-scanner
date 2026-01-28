@@ -7,26 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-01-28
 
+### 🐛 Bug Fixes (2026-01-28)
+- **XLSX Extraction Re-enabled**: Fixed dependency conflict by updating `zip` crate from 0.6 to 4.2
+  - Resolves compatibility issue between `calamine 0.32` and `zip` crate
+  - All XLSX formats now working: .xlsx, .xlsm, .xlsb, .xls
+- **Code Quality**: Resolved all clippy linter warnings
+  - Replaced manual modulo checks with `is_multiple_of()` method
+  - Refactored functions with too many arguments using parameter structs
+  - Fixed redundant closures and needless borrows
+  - Updated benchmarks to use `std::hint::black_box` instead of deprecated `criterion::black_box`
+- **CSV Reporter**: Confirmed fully functional (was incorrectly marked as incomplete)
+
+### 🚀 Major Features
+
+#### Database Scanning
+- **PostgreSQL, MySQL, MongoDB Support**: Scan databases directly for PII
+  - New `scan-db` command with connection string support
+  - Table/collection filtering with regex patterns
+  - Column filtering and exclusion
+  - Row sampling for large datasets (PostgreSQL TABLESAMPLE)
+  - Connection pooling (default 4 connections)
+  - Async operations with tokio
+  - Progress bars for database scans
+  - ~1,200 lines of code for database module
+
+#### Plugin System for Custom Detectors
+- **TOML-based Plugin Configuration**: Create custom PII detectors without code
+  - Load plugins from `.detector.toml` files
+  - Regex pattern matching with confidence levels
+  - Built-in validation: Luhn, mod11, IBAN checksums
+  - Context keywords for confidence boosting
+  - Configurable severity levels
+  - Example plugins: employee IDs, patient IDs, custom formats
+  - ~560 lines of code for plugin system
+
+#### API Endpoint Scanning
+- **Scan REST APIs for PII**: Test API responses for PII exposure
+  - New `api` command for scanning HTTP endpoints
+  - Support for GET, POST, PUT, PATCH, DELETE
+  - Custom headers and request bodies
+  - Configurable timeouts and redirect handling
+  - Batch scanning of multiple endpoints
+  - ~300 lines of code for API scanner
+
+#### Enhanced API Key Detection
+- **Entropy-based Secret Detection**: Advanced API key and secret scanning
+  - AWS keys (AKIA...), GitHub tokens (ghp_, ghs_, gho_)
+  - Stripe keys (sk_live_, pk_live_, rk_live_)
+  - OpenAI keys (sk-...), Slack tokens (xox...)
+  - Google API keys (AIza...), JWT tokens
+  - Private keys (RSA/DSA/EC PEM format)
+  - Generic high-entropy secrets (Base64/Hex patterns)
+  - Shannon entropy calculation
+  - Context-aware confidence scoring
+  - ~380 lines of enhanced detection code
+
 ### Added
-- **5 New Countries**: Poland (PESEL), Denmark (CPR), Sweden (Personnummer), Norway (Fødselsnummer), Finland (HETU)
-- **Configuration File Support**: TOML-based configuration with environment variable expansion
-  - Load settings from `~/.pii-radar/config.toml` or custom path with `--config`
-  - Configuration precedence: CLI args > config file > defaults
-  - Environment variable substitution with `${VAR_NAME}` syntax
-  - Example config file in `examples/config.toml`
-- **New Detectors**: 5 Nordic/Central European national ID detectors with comprehensive validation
+
+#### 5 New Countries
+- **Poland (PESEL)**, **Denmark (CPR)**, **Sweden (Personnummer)**, **Norway (Fødselsnummer)**, **Finland (HETU)**
+- Total: **12 countries supported** (BE, DE, DK, ES, FI, FR, GB, IT, NL, NO, PL, PT, SE)
+
+#### Configuration File Support
+- TOML-based configuration with environment variable expansion
+- Load settings from `~/.pii-radar/config.toml` or custom path with `--config`
+- Configuration precedence: CLI args > config file > defaults
+- Environment variable substitution with `${VAR_NAME}` syntax
+- Example config file in `examples/config.toml`
+- 6 tests for configuration module
+
+#### Performance Benchmarks
+- Comprehensive Criterion.rs benchmark suite
+- Plain text scanning benchmarks
+- Individual detector performance tests
+- PII density scenarios (0%, 1%, 5%, 10%)
+- File size distribution tests (1KB to 1MB)
+- Pattern complexity benchmarks
+- Thread scaling tests (1 to 32 threads)
 
 ### Improved
-- Enhanced test coverage: 251 tests passing (from 199 in v0.3.0)
-- Modular detector architecture with country-specific validation algorithms
-- Better error handling and validation for all numeric formats
+- **Test Coverage**: 287 tests passing (from 199 in v0.3.0) - **+88 tests (+44%)**
+- **Total Detectors**: 16+ detectors across 12 countries
+- **Code Quality**: Zero warnings in release build
+- **Modular Architecture**: Better separation of concerns
+- **Error Handling**: Improved validation and error messages
+- **Document Extraction**: XLSX extraction re-enabled with zip 4.2 compatibility
+
+### Fixed
+- **XLSX Extraction Re-enabled**: Resolved dependency conflict
+  - Updated `zip` dependency from 0.6 to 4.2 (compatible with calamine 0.32)
+  - Re-enabled `calamine = "0.32"` for Excel file support
+  - Full support for .xlsx, .xlsm, .xlsb, .xls formats
+  - Resolved `lzma-rust2`/`crc` conflict by using zip 4.2 instead of 7.2
+  - All document extractors (PDF, DOCX, XLSX) now fully functional
 
 ### Technical Details
-- 251 tests passing (89% test coverage)
-- 16 detectors across 12 countries
-- ~1,200 lines of code added
-- New dependencies: `toml` (0.8), `dirs` (5.0)
-- Configuration module with 6 passing tests
+- **Tests**: 287 passing (95% test coverage)
+- **Detectors**: 16+ across 12 countries
+- **Lines Added**: ~3,500+ lines of production code
+- **New Dependencies**: 
+  - Database: `sqlx` (0.7), `mongodb` (2.8), `tokio` (1.35), `futures` (0.3)
+  - Plugin: `toml` (0.8), `dirs` (5.0)
+  - API: `reqwest` (0.12), `url` (2.5)
+  - Benchmarks: `criterion` (0.8)
+  - Documents: `calamine` (0.32), `zip` (4.2)
+- **Feature Flags**: `database` feature for optional database support
 
 ### Detectors Added
 1. **Poland PESEL** - Polish national identification number (11 digits)

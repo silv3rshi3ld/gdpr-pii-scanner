@@ -1,4 +1,5 @@
 /// XLSX text extraction using calamine
+/// Re-enabled in v0.4.0 using zip 4.2 for compatibility with calamine 0.32
 use super::{ExtractorError, TextExtractor};
 use calamine::{open_workbook_auto, Data, Reader};
 use std::path::Path;

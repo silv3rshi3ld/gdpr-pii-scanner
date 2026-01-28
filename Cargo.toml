@@ -46,9 +46,9 @@ thiserror = "2.0"
 
 # Document Extraction
 lopdf = "0.39"              # PDF text extraction
-zip = "7.2"                 # DOCX support
+zip = "4.2"                 # DOCX and XLSX support (compatible with calamine 0.32)
 quick-xml = "0.39"          # XML parsing for DOCX
-calamine = "0.32"           # Excel/XLSX parsing
+calamine = "0.32"           # Excel/XLSX parsing - Re-enabled with zip 4.2 compatibility
 encoding_rs = "0.8"         # Character encoding detection
 
 # Crypto/Hashing (voor validatie)
@@ -57,6 +57,12 @@ base64 = "0.22"
 
 # Entropy berekening
 ordered-float = "5.1"
+
+# Database connectivity (optional feature for database scanning)
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "mysql", "sqlite"], optional = true }
+mongodb = { version = "2.8", optional = true }
+tokio = { version = "1.35", features = ["full"], optional = true }
+futures = { version = "0.3", optional = true }
 
 # Logging
 log = "0.4"
@@ -68,6 +74,10 @@ dirs = "5.0"
 # HTTP Client for API scanning
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 url = "2.5"
+
+[features]
+default = []
+database = ["sqlx", "mongodb", "tokio", "futures"]
 
 [dev-dependencies]
 criterion = "0.8"

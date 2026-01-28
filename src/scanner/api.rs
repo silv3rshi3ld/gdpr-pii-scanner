@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
 
-use crate::core::types::{FileResult, Match, ScanResults};
+use crate::core::types::{FileResult, ScanResults};
 use crate::core::Detector;
 
 /// Configuration for API endpoint scanning
@@ -112,8 +112,8 @@ pub fn scan_api_endpoint(
     // Add headers
     let mut headers = HeaderMap::new();
     for (key, value) in &config.headers {
-        let header_name = HeaderName::from_str(key)
-            .with_context(|| format!("Invalid header name: {}", key))?;
+        let header_name =
+            HeaderName::from_str(key).with_context(|| format!("Invalid header name: {}", key))?;
         let header_value = HeaderValue::from_str(value)
             .with_context(|| format!("Invalid header value for {}: {}", key, value))?;
         headers.insert(header_name, header_value);
@@ -131,7 +131,10 @@ pub fn scan_api_endpoint(
         Err(e) => {
             // Provide detailed error messages based on error type
             if e.is_timeout() {
-                return Err(anyhow::anyhow!("Request timed out after {} seconds", config.timeout_secs));
+                return Err(anyhow::anyhow!(
+                    "Request timed out after {} seconds",
+                    config.timeout_secs
+                ));
             } else if e.is_connect() {
                 return Err(anyhow::anyhow!("Connection failed: {}", e));
             } else if e.is_request() {
@@ -146,18 +149,27 @@ pub fn scan_api_endpoint(
     let status = response.status();
     if !status.is_success() {
         if status.is_client_error() {
-            return Err(anyhow::anyhow!("Client error: {} - {}", status, status.canonical_reason().unwrap_or("Unknown")));
+            return Err(anyhow::anyhow!(
+                "Client error: {} - {}",
+                status,
+                status.canonical_reason().unwrap_or("Unknown")
+            ));
         } else if status.is_server_error() {
-            return Err(anyhow::anyhow!("Server error: {} - {}", status, status.canonical_reason().unwrap_or("Unknown")));
+            return Err(anyhow::anyhow!(
+                "Server error: {} - {}",
+                status,
+                status.canonical_reason().unwrap_or("Unknown")
+            ));
         } else {
-            return Err(anyhow::anyhow!("HTTP request failed with status: {}", status));
+            return Err(anyhow::anyhow!(
+                "HTTP request failed with status: {}",
+                status
+            ));
         }
     }
 
     // Get response body as text
-    let response_text = response
-        .text()
-        .context("Failed to read response body")?;
+    let response_text = response.text().context("Failed to read response body")?;
 
     let response_size = response_text.len();
 
@@ -225,7 +237,7 @@ pub fn scan_api_endpoints(
         }
     }
 
-    let scan_duration = start_time.elapsed();
+    let _scan_duration = start_time.elapsed();
 
     Ok(ScanResults {
         total_files: endpoints.len(),
@@ -238,7 +250,7 @@ pub fn scan_api_endpoints(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{Confidence, GdprCategory, Location, Severity};
+    use crate::core::types::{Confidence, GdprCategory, Location, Match, Severity};
     use crate::core::Detector;
 
     // Mock detector for testing

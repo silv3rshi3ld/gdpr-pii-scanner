@@ -12,6 +12,9 @@ pub mod reporter;
 pub mod scanner;
 pub mod utils;
 
+#[cfg(feature = "database")]
+pub mod database;
+
 // Re-export commonly used types
 pub use config::Config;
 pub use core::{
@@ -24,7 +27,7 @@ pub use extractors::{
     DocxExtractor, ExtractorError, ExtractorRegistry, PdfExtractor, TextExtractor, XlsxExtractor,
 };
 pub use reporter::{CsvReporter, HtmlReporter, JsonReporter, TerminalReporter};
-pub use scanner::{ApiScanConfig, HttpMethod, ScanEngine, scan_api_endpoint, scan_api_endpoints};
+pub use scanner::{scan_api_endpoint, scan_api_endpoints, ApiScanConfig, HttpMethod, ScanEngine};
 
 pub use utils::{
     is_high_entropy, mask_credit_card, mask_email, mask_iban, mask_phone, mask_value,
@@ -88,6 +91,9 @@ pub fn default_registry() -> DetectorRegistry {
 
     // Universal personal detectors
     registry.register(Box::new(detectors::personal::EmailDetector::new()));
+
+    // Universal security detectors
+    registry.register(Box::new(detectors::security::ApiKeyDetector::new()));
 
     registry
 }
@@ -180,12 +186,18 @@ pub fn registry_for_countries(countries: Vec<String>) -> DetectorRegistry {
         registry.register(Box::new(detectors::gb::NhsDetector::new()));
     }
 
+    // Portugal
+    if should_include("pt") {
+        registry.register(Box::new(detectors::pt::NifDetector::new()));
+    }
+
     // Always include Pan-European detectors
     registry.register(Box::new(detectors::eu::IbanDetector::new()));
 
     // Always include Universal detectors
     registry.register(Box::new(detectors::financial::CreditCardDetector::new()));
     registry.register(Box::new(detectors::personal::EmailDetector::new()));
+    registry.register(Box::new(detectors::security::ApiKeyDetector::new()));
 
     registry
 }

@@ -7,7 +7,7 @@ use std::path::PathBuf;
     name = "pii-radar",
     version,
     about = "High-performance PII scanner for European data protection",
-    long_about = "Detects Personally Identifiable Information (PII) in local files\n\
+    long_about = "Detects Personally Identifiable Information (PII) in local files and databases\n\
                   Supports: Dutch BSN, IBAN, Credit Cards, Emails, and more\n\
                   Features context-aware GDPR Article 9 special category detection"
 )]
@@ -71,6 +71,66 @@ pub enum Commands {
         /// Load custom detector plugins from directory
         #[arg(long, value_name = "DIR")]
         plugins: Option<PathBuf>,
+    },
+
+    /// Scan a database for PII
+    #[cfg(feature = "database")]
+    ScanDb {
+        /// Database type (postgres, mysql, mongodb)
+        #[arg(long, value_name = "TYPE")]
+        db_type: String,
+
+        /// Connection string (e.g., postgresql://user:pass@host:port/database)
+        #[arg(short, long, value_name = "URL")]
+        connection: String,
+
+        /// Database name (required for MongoDB, optional for others)
+        #[arg(short = 'd', long, value_name = "NAME")]
+        database: Option<String>,
+
+        /// Filter by tables/collections (comma-separated)
+        #[arg(short = 't', long, value_name = "NAMES")]
+        tables: Option<String>,
+
+        /// Exclude tables/collections (comma-separated)
+        #[arg(long, value_name = "NAMES")]
+        exclude_tables: Option<String>,
+
+        /// Filter by columns/fields (comma-separated)
+        #[arg(long, value_name = "NAMES")]
+        columns: Option<String>,
+
+        /// Exclude columns/fields (comma-separated)
+        #[arg(long, value_name = "NAMES")]
+        exclude_columns: Option<String>,
+
+        /// Sample percentage (1-100) for large tables
+        #[arg(long, value_name = "PERCENT")]
+        sample_percent: Option<u8>,
+
+        /// Row limit per table
+        #[arg(long, value_name = "N")]
+        row_limit: Option<usize>,
+
+        /// Pool size for database connections
+        #[arg(long, value_name = "N", default_value = "4")]
+        pool_size: u32,
+
+        /// Output format
+        #[arg(short = 'f', long, value_name = "FORMAT", default_value = "terminal")]
+        format: OutputFormat,
+
+        /// Output file
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+
+        /// Filter by country codes
+        #[arg(long, value_name = "CODES")]
+        countries: Option<String>,
+
+        /// Disable progress bar
+        #[arg(long)]
+        no_progress: bool,
     },
 
     /// List all available detectors

@@ -12,6 +12,8 @@ pub mod nl; // Netherlands
 pub mod no; // Norway
 pub mod personal; // Universal personal
 pub mod pl; // Poland
+pub mod plugin; // Plugin system for custom detectors
+pub mod plugin_loader; // Plugin loader utilities
 pub mod pt; // Portugal
 pub mod se; // Sweden
 pub mod security; // Universal security

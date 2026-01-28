@@ -115,6 +115,42 @@ pub fn mask_phone(phone: &str) -> String {
     )
 }
 
+/// Mask API key or secret (show first 4-8 chars depending on prefix, mask the rest)
+///
+/// Examples:
+/// - "AKIAIOSFODNN7EXAMPLE" → "AKIA****************"
+/// - "sk_live_abcdefghijklmnop" → "sk_live_***************"
+/// - "ghp_1234567890abcdefghijklmnopqrstu123456" → "ghp_************************************"
+pub fn mask_api_key(key: &str) -> String {
+    let len = key.len();
+
+    if len <= 8 {
+        return "*".repeat(len);
+    }
+
+    // Check for known prefixes
+    let show_chars = if key.starts_with("sk_live_")
+        || key.starts_with("pk_live_")
+        || key.starts_with("rk_live_")
+    {
+        8
+    } else if key.starts_with("sk-") || key.starts_with("xox") {
+        3
+    } else if key.starts_with("AKIA")
+        || key.starts_with("ghp_")
+        || key.starts_with("ghs_")
+        || key.starts_with("gho_")
+        || key.starts_with("AIza")
+    {
+        4
+    } else {
+        4.min(len / 4)
+    };
+
+    let mask_len = len - show_chars;
+    format!("{}{}", &key[..show_chars], "*".repeat(mask_len))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +191,26 @@ mod tests {
         assert_eq!(mask_phone("+31612345678"), "+31******678");
         assert_eq!(mask_phone("0612345678"), "06*****678");
         assert_eq!(mask_phone("+44 20 1234 5678"), "+44*******678");
+    }
+
+    #[test]
+    fn test_mask_api_key() {
+        assert_eq!(mask_api_key("AKIAIOSFODNN7EXAMPLE"), "AKIA****************");
+        assert_eq!(
+            mask_api_key("sk_live_abcdefghijklmnop"),
+            "sk_live_****************"
+        );
+        assert_eq!(
+            mask_api_key("ghp_1234567890abcdefghijklmnopqrstu123456"),
+            "ghp_*************************************"
+        );
+        assert_eq!(
+            mask_api_key("sk-1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL"),
+            "sk-************************************************"
+        );
+        assert_eq!(
+            mask_api_key("xoxb-1234567890-abcdefghijk"),
+            "xox************************"
+        );
     }
 }
