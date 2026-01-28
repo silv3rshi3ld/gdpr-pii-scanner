@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-01-28
 
+### 🐛 Bug Fixes (2026-01-28)
+- **XLSX Extraction Re-enabled**: Fixed dependency conflict by updating `zip` crate from 0.6 to 4.2
+  - Resolves compatibility issue between `calamine 0.32` and `zip` crate
+  - All XLSX formats now working: .xlsx, .xlsm, .xlsb, .xls
+- **Code Quality**: Resolved all clippy linter warnings
+  - Replaced manual modulo checks with `is_multiple_of()` method
+  - Refactored functions with too many arguments using parameter structs
+  - Fixed redundant closures and needless borrows
+  - Updated benchmarks to use `std::hint::black_box` instead of deprecated `criterion::black_box`
+- **CSV Reporter**: Confirmed fully functional (was incorrectly marked as incomplete)
+
 ### 🚀 Major Features
 
 #### Database Scanning
