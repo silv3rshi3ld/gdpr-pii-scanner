@@ -70,11 +70,7 @@ impl PostgresScanner {
     }
 
     /// Scan a single table for PII
-    pub async fn scan_table(
-        &self,
-        table: &str,
-        options: &ScanOptions,
-    ) -> Result<TableScanResult> {
+    pub async fn scan_table(&self, table: &str, options: &ScanOptions) -> Result<TableScanResult> {
         let start_time = Instant::now();
         let mut result = TableScanResult::new(table.to_string());
 
@@ -121,7 +117,10 @@ impl PostgresScanner {
 
             // Scan each column in the row
             for (col_idx, column_name) in columns.iter().enumerate() {
-                if let Some(matches) = self.scan_column(&row, col_idx, column_name, table, row_count).await {
+                if let Some(matches) = self
+                    .scan_column(&row, col_idx, column_name, table, row_count)
+                    .await
+                {
                     result.matches.extend(matches);
                 }
             }
@@ -157,7 +156,7 @@ impl PostgresScanner {
             // Run all detectors on the column value
             for detector in self.registry.all() {
                 let detector_matches = detector.detect(&text, &path);
-                
+
                 // Add database-specific metadata to matches
                 for mut m in detector_matches {
                     // Update location to include database context
@@ -177,10 +176,7 @@ impl PostgresScanner {
     }
 
     /// Scan all tables in the database
-    pub async fn scan_database(
-        &self,
-        options: &ScanOptions,
-    ) -> Result<Vec<TableScanResult>> {
+    pub async fn scan_database(&self, options: &ScanOptions) -> Result<Vec<TableScanResult>> {
         let all_tables = self.get_tables().await?;
         let tables: Vec<String> = all_tables
             .into_iter()
@@ -210,7 +206,7 @@ impl PostgresScanner {
             }
 
             let result = self.scan_table(table, options).await?;
-            
+
             if let Some(ref pb) = pb {
                 pb.println(format!(
                     "✓ {} - {} rows, {} matches",

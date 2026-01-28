@@ -2,9 +2,9 @@
 use clap::Parser;
 use pii_radar::cli::{Cli, Commands, OutputFormat};
 use pii_radar::{
-    default_registry, registry_for_countries, CsvReporter, DocxExtractor, ExtractorRegistry,
-    HtmlReporter, JsonReporter, PdfExtractor, ScanEngine, TerminalReporter, Walker,
-    XlsxExtractor, ApiScanConfig, HttpMethod, scan_api_endpoints,
+    default_registry, registry_for_countries, scan_api_endpoints, ApiScanConfig, CsvReporter,
+    DocxExtractor, ExtractorRegistry, HtmlReporter, HttpMethod, JsonReporter, PdfExtractor,
+    ScanEngine, TerminalReporter, Walker, XlsxExtractor,
 };
 use std::collections::HashMap;
 use std::process;
@@ -112,9 +112,7 @@ fn handle_file_commands(command: Commands) {
             };
 
             // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(|| {
-                pii_radar::default_plugins_dir()
-            });
+            let plugins_dir = plugins.unwrap_or_else(|| pii_radar::default_plugins_dir());
 
             if plugins_dir.exists() {
                 match pii_radar::load_plugins(&plugins_dir) {
@@ -278,7 +276,10 @@ fn handle_file_commands(command: Commands) {
                 if let Some((key, value)) = header.split_once(':') {
                     header_map.insert(key.trim().to_string(), value.trim().to_string());
                 } else {
-                    eprintln!("❌ Error: Invalid header format: {}. Expected KEY:VALUE", header);
+                    eprintln!(
+                        "❌ Error: Invalid header format: {}. Expected KEY:VALUE",
+                        header
+                    );
                     process::exit(1);
                 }
             }
@@ -297,9 +298,7 @@ fn handle_file_commands(command: Commands) {
             let mut registry = default_registry();
 
             // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(|| {
-                pii_radar::default_plugins_dir()
-            });
+            let plugins_dir = plugins.unwrap_or_else(|| pii_radar::default_plugins_dir());
 
             if plugins_dir.exists() {
                 match pii_radar::load_plugins(&plugins_dir) {
@@ -362,8 +361,8 @@ fn handle_file_commands(command: Commands) {
                 OutputFormat::Html => {
                     let reporter = HtmlReporter::new();
 
-                    let output_path =
-                        output.unwrap_or_else(|| std::path::PathBuf::from("pii-radar-api-report.html"));
+                    let output_path = output
+                        .unwrap_or_else(|| std::path::PathBuf::from("pii-radar-api-report.html"));
 
                     if let Err(e) = reporter.write_to_file(&results, &output_path) {
                         eprintln!("❌ Error: {}", e);
@@ -462,29 +461,28 @@ async fn handle_scan_db(
     // Build scan options
     let mut scan_options = ScanOptions::new();
     scan_options.show_progress = !no_progress;
-    
+
     if let Some(t) = tables {
         scan_options.include_tables = Some(t.split(',').map(|s| s.trim().to_string()).collect());
     }
-    
+
     if let Some(e) = exclude_tables {
         scan_options.exclude_tables = e.split(',').map(|s| s.trim().to_string()).collect();
     }
-    
+
     if let Some(c) = columns {
         scan_options.include_columns = Some(c.split(',').map(|s| s.trim().to_string()).collect());
     }
-    
+
     if let Some(e) = exclude_columns {
         scan_options.exclude_columns = e.split(',').map(|s| s.trim().to_string()).collect();
     }
-    
+
     scan_options.sample_percent = sample_percent;
     scan_options.row_limit = row_limit;
 
     // Build database config
-    let config = DatabaseConfig::new(db_type, connection)
-        .with_pool_size(pool_size);
+    let config = DatabaseConfig::new(db_type, connection).with_pool_size(pool_size);
 
     // Create scanner
     let scanner = match DatabaseScanner::new(config, Some(&db_name), registry).await {
@@ -509,7 +507,10 @@ async fn handle_scan_db(
 
     // Print summary
     println!("\n📊 Scan Summary:");
-    println!("   Database: {} ({})", results.database_name, results.database_type);
+    println!(
+        "   Database: {} ({})",
+        results.database_name, results.database_type
+    );
     println!("   Tables/Collections: {}", results.tables_scanned.len());
     println!("   Total Rows: {}", results.total_rows);
     println!("   Total Matches: {}", results.total_matches);
@@ -521,10 +522,14 @@ async fn handle_scan_db(
             println!("\n📋 Detailed Results:");
             for table in &results.tables_scanned {
                 if table.matches_found > 0 {
-                    println!("\n🗂️  {} ({} matches in {} rows):", table.name, table.matches_found, table.rows_scanned);
+                    println!(
+                        "\n🗂️  {} ({} matches in {} rows):",
+                        table.name, table.matches_found, table.rows_scanned
+                    );
                     for m in &table.matches {
-                        println!("   ⚠️  {} - {} (Line: {}, Column: {})", 
-                            m.detector_name, 
+                        println!(
+                            "   ⚠️  {} - {} (Line: {}, Column: {})",
+                            m.detector_name,
                             m.value_masked,
                             m.location.line,
                             m.location.file_path.display()

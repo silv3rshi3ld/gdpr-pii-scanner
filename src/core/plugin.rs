@@ -12,7 +12,7 @@
 /// pattern = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
 /// severity = "critical"
 /// confidence = "medium"
-/// 
+///
 /// [validation]
 /// # Optional: Validation rules
 /// min_length = 11
@@ -147,11 +147,11 @@ impl PluginDetector {
 
     /// Load a plugin from a TOML file
     pub fn from_file(path: &Path) -> Result<Self, String> {
-        let contents = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read plugin file: {}", e))?;
+        let contents =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read plugin file: {}", e))?;
 
-        let config: PluginConfig = toml::from_str(&contents)
-            .map_err(|e| format!("Failed to parse plugin TOML: {}", e))?;
+        let config: PluginConfig =
+            toml::from_str(&contents).map_err(|e| format!("Failed to parse plugin TOML: {}", e))?;
 
         Self::new(config)
     }
@@ -311,9 +311,11 @@ impl Detector for PluginDetector {
     }
 
     fn description(&self) -> Option<String> {
-        self.config.detector.description.clone().or_else(|| {
-            Some("Custom plugin detector".to_string())
-        })
+        self.config
+            .detector
+            .description
+            .clone()
+            .or_else(|| Some("Custom plugin detector".to_string()))
     }
 }
 

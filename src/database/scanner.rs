@@ -31,8 +31,7 @@ impl DatabaseScanner {
                 Ok(DatabaseScanner::MySQL(scanner))
             }
             DatabaseType::MongoDB => {
-                let db_name = database_name
-                    .context("Database name required for MongoDB")?;
+                let db_name = database_name.context("Database name required for MongoDB")?;
                 let scanner = MongoScanner::new(&config, db_name, registry).await?;
                 Ok(DatabaseScanner::MongoDB(scanner))
             }
@@ -55,7 +54,7 @@ impl DatabaseScanner {
         };
 
         let mut results = DatabaseScanResults::new(db_type, database_name.to_string());
-        
+
         for table_result in table_results {
             results.add_table_result(table_result);
         }

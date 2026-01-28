@@ -1,5 +1,5 @@
 /// Database scanning module for PII detection in databases
-/// 
+///
 /// Supports PostgreSQL, MySQL, and MongoDB databases with:
 /// - Connection pooling
 /// - Table/collection filtering

@@ -59,7 +59,7 @@ impl MongoScanner {
 
         // Build query options
         let mut find_options = mongodb::options::FindOptions::default();
-        
+
         if let Some(limit) = options.row_limit {
             find_options.limit = Some(limit as i64);
         }
@@ -78,7 +78,10 @@ impl MongoScanner {
             doc_count += 1;
 
             // Scan document
-            if let Some(matches) = self.scan_document(&document, collection, doc_count, options).await {
+            if let Some(matches) = self
+                .scan_document(&document, collection, doc_count, options)
+                .await
+            {
                 result.matches.extend(matches);
             }
         }
@@ -136,11 +139,11 @@ impl MongoScanner {
                 Bson::String(text) => {
                     if !text.is_empty() {
                         let path = PathBuf::from(format!("{}:{}", collection, field_name));
-                        
+
                         // Run all detectors on the field value
                         for detector in self.registry.all() {
                             let detector_matches = detector.detect(text, &path);
-                            
+
                             // Add database-specific metadata to matches
                             for mut m in detector_matches {
                                 m.location.line = doc_num;
@@ -164,15 +167,16 @@ impl MongoScanner {
                     // Scan array elements
                     for (idx, item) in array.iter().enumerate() {
                         let array_field = format!("{}[{}]", field_name, idx);
-                        
+
                         match item {
                             Bson::String(text) => {
                                 if !text.is_empty() {
-                                    let path = PathBuf::from(format!("{}:{}", collection, array_field));
-                                    
+                                    let path =
+                                        PathBuf::from(format!("{}:{}", collection, array_field));
+
                                     for detector in self.registry.all() {
                                         let detector_matches = detector.detect(text, &path);
-                                        
+
                                         for mut m in detector_matches {
                                             m.location.line = doc_num;
                                             matches.push(m);
@@ -200,10 +204,7 @@ impl MongoScanner {
     }
 
     /// Scan all collections in the database
-    pub async fn scan_database(
-        &self,
-        options: &ScanOptions,
-    ) -> Result<Vec<TableScanResult>> {
+    pub async fn scan_database(&self, options: &ScanOptions) -> Result<Vec<TableScanResult>> {
         let all_collections = self.get_collections().await?;
         let collections: Vec<String> = all_collections
             .into_iter()
@@ -233,7 +234,7 @@ impl MongoScanner {
             }
 
             let result = self.scan_collection(collection, options).await?;
-            
+
             if let Some(ref pb) = pb {
                 pb.println(format!(
                     "✓ {} - {} documents, {} matches",

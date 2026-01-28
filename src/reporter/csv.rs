@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn test_csv_with_context() {
         use crate::core::SpecialCategory;
-        
+
         let results = ScanResults {
             files: vec![FileResult {
                 path: PathBuf::from("test.txt"),
