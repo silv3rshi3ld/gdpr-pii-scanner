@@ -76,7 +76,7 @@ pub enum Commands {
     /// Scan a database for PII
     #[cfg(feature = "database")]
     ScanDb {
-        /// Database type (postgres, mysql, mongodb)
+        /// Database type (postgres, mongodb, sqlite)
         #[arg(long, value_name = "TYPE")]
         db_type: String,
 

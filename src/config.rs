@@ -127,7 +127,7 @@ pub struct DatabaseConnection {
     /// Connection string (supports environment variable substitution)
     pub connection_string: String,
 
-    /// Database type (postgres, mysql)
+    /// Database type (postgres, mongodb, sqlite)
     pub db_type: String,
 
     /// Tables to scan (empty = all tables)

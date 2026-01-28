@@ -8,16 +8,16 @@ use std::time::Duration;
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
     PostgreSQL,
-    MySQL,
     MongoDB,
+    SQLite,
 }
 
 impl std::fmt::Display for DatabaseType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DatabaseType::PostgreSQL => write!(f, "PostgreSQL"),
-            DatabaseType::MySQL => write!(f, "MySQL"),
             DatabaseType::MongoDB => write!(f, "MongoDB"),
+            DatabaseType::SQLite => write!(f, "SQLite"),
         }
     }
 }
@@ -28,9 +28,12 @@ impl std::str::FromStr for DatabaseType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "postgres" | "postgresql" | "pg" => Ok(DatabaseType::PostgreSQL),
-            "mysql" | "mariadb" => Ok(DatabaseType::MySQL),
             "mongo" | "mongodb" => Ok(DatabaseType::MongoDB),
-            _ => Err(format!("Unknown database type: {}", s)),
+            "sqlite" | "sqlite3" => Ok(DatabaseType::SQLite),
+            _ => Err(format!(
+                "Unknown database type: {}. Supported: postgres, mongodb, sqlite",
+                s
+            )),
         }
     }
 }

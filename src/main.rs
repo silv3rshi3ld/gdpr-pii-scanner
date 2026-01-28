@@ -427,7 +427,7 @@ async fn handle_scan_db(params: DbScanParams) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("❌ Error: {}", e);
-            eprintln!("Supported types: postgres, mysql, mongodb");
+            eprintln!("Supported types: postgres, mongodb, sqlite");
             process::exit(1);
         }
     };
