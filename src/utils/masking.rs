@@ -1,4 +1,5 @@
-/// PII masking utilities for safe display and logging
+//! PII masking utilities for safe display and logging
+
 /// Mask a PII value for display
 ///
 /// Shows first 3 and last 2 characters, masks the middle

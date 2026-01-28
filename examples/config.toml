@@ -1,0 +1,96 @@
+# PII-Radar Configuration File Example
+# Place this file at ~/.pii-radar/config.toml or ./.pii-radar.toml
+
+[scan]
+# Minimum confidence level to report (low, medium, high)
+min_confidence = "high"
+
+# Extract text from documents (PDF, DOCX, XLSX)
+extract_documents = true
+
+# Maximum number of threads to use (default: auto-detect)
+max_threads = 8
+
+# Filter by specific countries (2-letter codes)
+# Available: be, de, es, fr, gb, it, nl, pt
+countries = ["nl", "de", "gb"]
+
+# Disable context analysis for faster scanning
+no_context = false
+
+[output]
+# Output format: terminal, json, json-compact, html
+format = "terminal"
+
+# Output file path (optional, for json/html formats)
+# output_path = "results.json"
+
+# Show full file paths instead of relative paths
+full_paths = false
+
+# Disable progress bar (useful for CI/CD)
+no_progress = false
+
+[filters]
+# Maximum file size to scan in MB
+max_filesize_mb = 100
+
+# Maximum directory recursion depth (optional)
+# max_depth = 10
+
+# Database scanning configuration (v0.4.0+)
+[database]
+connections = [
+    {
+        name = "production_db",
+        connection_string = "${DATABASE_URL}",  # Use environment variables
+        db_type = "postgres",  # postgres or mysql
+        tables = ["users", "orders", "customers"],  # Empty = all tables
+        columns = [],  # Empty = all columns
+        timeout_seconds = 30
+    },
+    # {
+    #     name = "analytics_db",
+    #     connection_string = "mysql://user:${MYSQL_PASSWORD}@localhost:3306/analytics",
+    #     db_type = "mysql",
+    #     tables = [],
+    #     columns = [],
+    #     timeout_seconds = 30
+    # }
+]
+
+# API endpoint scanning configuration (v0.4.0+)
+[api]
+endpoints = [
+    {
+        name = "user_api",
+        url = "https://api.example.com/users",
+        method = "GET",  # GET or POST
+        headers = { "Authorization" = "Bearer ${API_TOKEN}" },
+        # body = "{\"query\":\"all\"}",  # For POST requests
+        scan_headers = true,
+        scan_body = true,
+        rate_limit_ms = 1000  # Delay between requests
+    },
+    # {
+    #     name = "customer_api",
+    #     url = "https://api.example.com/customers",
+    #     method = "POST",
+    #     headers = { "Content-Type" = "application/json" },
+    #     body = "{\"filter\":\"active\"}",
+    #     scan_headers = false,
+    #     scan_body = true,
+    #     rate_limit_ms = 2000
+    # }
+]
+
+# Plugin configuration (v0.4.0+)
+[plugins]
+# Plugin directories to search
+directories = [
+    "~/.pii-radar/plugins",
+    "./plugins"
+]
+
+# Enable/disable plugin system
+enabled = true

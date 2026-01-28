@@ -1,10 +1,12 @@
-/// Checksum validation utilities voor PII detectie
-///
-/// Dit module bevat algoritmes voor:
-/// - Nederlandse BSN 11-proef validatie
-/// - Luhn algoritme (creditcards)
-/// - IBAN modulo-97 validatie
-/// - Modulo-10 en modulo-11 checksums
+//! Checksum validation utilities voor PII detectie
+//!
+//! Dit module bevat algoritmes voor:
+//!
+//! - Nederlandse BSN 11-proef validatie
+//! - Luhn algoritme (creditcards)
+//! - IBAN modulo-97 validatie
+//! - Modulo-10 en modulo-11 checksums
+
 /// Valideert een Nederlands BSN (Burgerservicenummer) met de 11-proef
 ///
 /// De 11-proef is een checksum algoritme waarbij elk cijfer wordt vermenigvuldigd
@@ -327,7 +329,7 @@ pub fn validate_spain_id(id: &str) -> bool {
 /// ```
 /// use pii_radar::validate_belgian_rrn;
 ///
-/// assert!(validate_belgian_rrn("85073000184")); // Valid RRN
+/// assert!(validate_belgian_rrn("85073000160")); // Valid RRN
 /// ```
 pub fn validate_belgian_rrn(rrn: &str) -> bool {
     // Remove separators
@@ -370,10 +372,12 @@ pub fn validate_belgian_rrn(rrn: &str) -> bool {
 ///
 /// # Algorithm
 /// Starting with M=10, for each digit d1-d10:
+///
 /// 1. S = (d + M) % 10
 /// 2. If S == 0, S = 10
 /// 3. M = (S * 2) % 11
-/// Final check: (11 - M) % 10 must equal digit 11
+///
+///    Final check: (11 - M) % 10 must equal digit 11
 ///
 /// # Examples
 /// ```

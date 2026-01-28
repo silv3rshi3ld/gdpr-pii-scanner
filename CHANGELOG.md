@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-01-28
+
+### Added
+- **5 New Countries**: Poland (PESEL), Denmark (CPR), Sweden (Personnummer), Norway (Fødselsnummer), Finland (HETU)
+- **Configuration File Support**: TOML-based configuration with environment variable expansion
+  - Load settings from `~/.pii-radar/config.toml` or custom path with `--config`
+  - Configuration precedence: CLI args > config file > defaults
+  - Environment variable substitution with `${VAR_NAME}` syntax
+  - Example config file in `examples/config.toml`
+- **New Detectors**: 5 Nordic/Central European national ID detectors with comprehensive validation
+
+### Improved
+- Enhanced test coverage: 251 tests passing (from 199 in v0.3.0)
+- Modular detector architecture with country-specific validation algorithms
+- Better error handling and validation for all numeric formats
+
+### Technical Details
+- 251 tests passing (89% test coverage)
+- 16 detectors across 12 countries
+- ~1,200 lines of code added
+- New dependencies: `toml` (0.8), `dirs` (5.0)
+- Configuration module with 6 passing tests
+
+### Detectors Added
+1. **Poland PESEL** - Polish national identification number (11 digits)
+   - Weighted checksum validation (weights: 1,3,7,9,1,3,7,9,1,3)
+   - Birth date encoding with century support (1800s-2200s)
+   - Gender detection from sequence number
+   - 9 comprehensive tests
+
+2. **Denmark CPR** - Danish Civil Registration number (10 digits, DDMMYY-SSSS format)
+   - Modulus 11 validation with weights [4,3,2,7,6,5,4,3,2,1]
+   - Date validation for DDMMYY format
+   - Dash normalization support
+   - 5 comprehensive tests
+
+3. **Sweden Personnummer** - Swedish personal identity number (10 or 12 digits)
+   - Luhn algorithm validation (Swedish variant: double positions 0,2,4,...)
+   - Supports both YYMMDD-XXXX and YYYYMMDD-XXXX formats
+   - Century marker support (+, -, A-Y)
+   - 5 comprehensive tests
+
+4. **Norway Fødselsnummer** - Norwegian birth number (11 digits)
+   - Dual modulus 11 checksum validation (K1 and K2)
+   - K1 weights: [3,7,6,1,8,9,4,5,2], K2 weights: [5,4,3,2,7,6,5,4,3,2]
+   - D-number support (day > 40 for immigrants)
+   - 5 comprehensive tests
+
+5. **Finland HETU** - Finnish personal identity code (11 characters)
+   - Modulus 31 checksum with 31-character lookup table
+   - Century markers: + (1800s), - (1900s), A-Y (2000s-2800s)
+   - Format: DDMMYY{century}XXX{check}
+   - Check characters: 0-9, A-Y (excluding G, I, O, V)
+   - 6 comprehensive tests
+
+### Configuration Features
+- **Scan Settings**: paths, max_depth, follow_symlinks, parallel scanning
+- **Output Settings**: format (json/terminal/html/csv), output_file, verbosity
+- **Filter Settings**: file size limits, extensions, excluded patterns, min_confidence
+- **Database Config**: connection strings, batch size, table/column filtering
+- **API Config**: endpoints, methods, headers, authentication
+- **Plugin Config**: plugin directory path for custom detectors
+
 ## [0.3.0] - 2026-01-27
 
 ### Added

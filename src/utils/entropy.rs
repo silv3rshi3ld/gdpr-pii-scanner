@@ -221,7 +221,7 @@ mod tests {
 
         // Medium randomness
         let medium_score = randomness_score("password123");
-        assert!(medium_score >= 3 && medium_score <= 6);
+        assert!((3..=6).contains(&medium_score));
 
         // High randomness
         let high_score = randomness_score("aK9$mP3zQ!vX2rT8nB5wL4");

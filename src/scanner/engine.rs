@@ -113,10 +113,10 @@ impl ScanEngine {
                         m.location.end_byte,
                     ) {
                         // Upgrade severity if special category detected
-                        if context.category.is_some() {
+                        if let Some(category) = context.category {
                             m.severity = crate::core::Severity::Critical;
                             m.gdpr_category = GdprCategory::Special {
-                                category: context.category.unwrap(),
+                                category,
                                 detected_keywords: context.keywords.clone(),
                             };
                         }
@@ -313,7 +313,7 @@ mod tests {
         let result = engine.scan_file(&pdf_path);
         assert!(result.error.is_none(), "PDF extraction should succeed");
         assert!(
-            result.matches.len() > 0,
+            !result.matches.is_empty(),
             "Should find PII in extracted PDF text"
         );
     }
@@ -427,6 +427,19 @@ mod tests {
 
         let mut doc = Document::with_version("1.5");
 
+        // Create a font dictionary
+        let mut font = Dictionary::new();
+        font.set("Type", "Font");
+        font.set("Subtype", "Type1");
+        font.set("BaseFont", "Helvetica");
+        let font_id = doc.add_object(font);
+
+        // Create resources dictionary with the font
+        let mut resources = Dictionary::new();
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", font_id);
+        resources.set("Font", Object::Dictionary(fonts));
+
         // Create page content with PII
         let content = Content {
             operations: vec![
@@ -440,13 +453,14 @@ mod tests {
 
         let content_data = content.encode().unwrap();
         let content_stream = Stream::new(Dictionary::new(), content_data);
-
         let content_id = doc.add_object(content_stream);
 
-        // Create page
+        // Create page with MediaBox and Resources
         let mut page = Dictionary::new();
         page.set("Type", "Page");
         page.set("Contents", content_id);
+        page.set("MediaBox", vec![0.into(), 0.into(), 612.into(), 792.into()]);
+        page.set("Resources", Object::Dictionary(resources));
 
         let page_id = doc.add_object(page);
 

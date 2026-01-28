@@ -335,10 +335,12 @@ impl ScanResults {
     ///
     /// # Example
     ///
-    /// ```
-    /// use pii_radar::{ScanResults, Confidence};
+    /// ```no_run
+    /// use pii_radar::{ScanResults, Confidence, ScanEngine, default_registry};
+    /// use std::path::PathBuf;
     ///
-    /// let results = scan_engine.scan_directory(path);
+    /// let scan_engine = ScanEngine::new(default_registry());
+    /// let results = scan_engine.scan_directory(&PathBuf::from("."));
     /// let high_confidence_only = results.filter_by_confidence(Confidence::High);
     /// // high_confidence_only now contains only High confidence matches
     /// ```

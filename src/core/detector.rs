@@ -143,6 +143,8 @@ impl DetectorRegistry {
     /// # Example
     ///
     /// ```
+    /// use pii_radar::default_registry;
+    ///
     /// let registry = default_registry();
     /// let gb_detectors = registry.for_countries(&["gb"]);
     /// ```

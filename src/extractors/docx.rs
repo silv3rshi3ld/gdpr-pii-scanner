@@ -17,14 +17,17 @@ impl DocxExtractor {
     /// Extract text from an XML content part
     fn extract_text_from_xml(xml_content: &str) -> Result<String, ExtractorError> {
         let mut reader = Reader::from_str(xml_content);
-        reader.trim_text(true);
+        // Don't trim text to preserve spaces
+        reader.config_mut().trim_text(false);
+        reader.config_mut().expand_empty_elements = true;
 
         let mut text = String::new();
         let mut buf = Vec::new();
         let mut in_text_element = false;
 
         loop {
-            match reader.read_event_into(&mut buf) {
+            let event = reader.read_event_into(&mut buf);
+            match event {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                     // Check if we're in a text element (w:t)
                     if e.name().as_ref() == b"w:t" {
@@ -33,10 +36,35 @@ impl DocxExtractor {
                 }
                 Ok(Event::Text(e)) => {
                     if in_text_element {
-                        let txt = e.unescape().map_err(|e| {
-                            ExtractorError::ExtractionFailed(format!("XML decode error: {}", e))
-                        })?;
-                        text.push_str(&txt);
+                        let bytes: &[u8] = e.as_ref();
+                        // Decode the text content from bytes to string
+                        match reader.decoder().decode(bytes) {
+                            Ok(decoded) => {
+                                text.push_str(&decoded);
+                            }
+                            Err(e) => {
+                                return Err(ExtractorError::ExtractionFailed(format!(
+                                    "XML decode error: {}",
+                                    e
+                                )))
+                            }
+                        }
+                    }
+                }
+                Ok(Event::GeneralRef(entity)) => {
+                    if in_text_element {
+                        // Expand common HTML entities
+                        let entity_name =
+                            reader.decoder().decode(entity.as_ref()).unwrap_or_default();
+                        let expanded = match entity_name.as_ref() {
+                            "amp" => "&",
+                            "lt" => "<",
+                            "gt" => ">",
+                            "quot" => "\"",
+                            "apos" => "'",
+                            _ => "", // Unknown entity, skip
+                        };
+                        text.push_str(expanded);
                     }
                 }
                 Ok(Event::End(ref e)) => {
@@ -48,13 +76,13 @@ impl DocxExtractor {
                     }
                 }
                 Ok(Event::Eof) => break,
+                Ok(_) => {} // Ignore other events
                 Err(e) => {
                     return Err(ExtractorError::ExtractionFailed(format!(
                         "XML parse error: {}",
                         e
                     )))
                 }
-                _ => {}
             }
             buf.clear();
         }
@@ -202,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_docx_extractor_default() {
-        let extractor = DocxExtractor::default();
+        let extractor = DocxExtractor;
         assert_eq!(extractor.name(), "DOCX Extractor");
     }
 
@@ -233,6 +261,8 @@ mod tests {
 
     #[test]
     fn test_extract_text_from_xml_with_special_chars() {
+        // In actual DOCX files, entities like &amp; would be used,
+        // but when testing with raw strings, we use the actual characters
         let xml = r#"<?xml version="1.0"?>
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
                 <w:body>
@@ -247,6 +277,8 @@ mod tests {
         let result = DocxExtractor::extract_text_from_xml(xml);
         assert!(result.is_ok());
         let text = result.unwrap();
+        // quick-xml 0.39 automatically unescapes entities during parsing
+        // So &amp; becomes &, &lt; becomes <, &gt; becomes >
         assert!(text.contains("Test & Special <chars>"));
     }
 

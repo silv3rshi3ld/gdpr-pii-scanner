@@ -146,22 +146,25 @@ impl PluginDetector {
 impl Detector for PluginDetector {
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
         let mut matches = Vec::new();
-        
+
         for compiled in &self.patterns {
             for cap in compiled.regex.captures_iter(text).flatten() {
                 let matched = cap.get(0).unwrap();
                 let value = matched.as_str();
-                
+
                 if !self.validate_match(value) {
                     continue;
                 }
-                
+
                 let start = matched.start();
                 let preceding = &text[..start];
                 let line = preceding.matches('\n').count() + 1;
-                let column = preceding.rfind('\n').map(|p| start - p - 1).unwrap_or(start);
+                let column = preceding
+                    .rfind('\n')
+                    .map(|p| start - p - 1)
+                    .unwrap_or(start);
                 let value_masked = crate::utils::masking::mask_value(value);
-                
+
                 matches.push(Match {
                     detector_id: self.config.id.clone(),
                     detector_name: self.config.name.clone(),
@@ -181,26 +184,26 @@ impl Detector for PluginDetector {
                 });
             }
         }
-        
+
         matches
     }
-    
+
     fn id(&self) -> &str {
         &self.config.id
     }
-    
+
     fn name(&self) -> &str {
         &self.config.name
     }
-    
+
     fn country(&self) -> &str {
         &self.config.country
     }
-    
+
     fn base_severity(&self) -> Severity {
         self.severity
     }
-    
+
     fn validate(&self, value: &str) -> bool {
         self.validate_match(value)
     }
@@ -209,7 +212,7 @@ impl Detector for PluginDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn test_config() -> PluginConfig {
         PluginConfig {
             id: "test_emp".to_string(),
@@ -234,12 +237,12 @@ mod tests {
             context_keywords: vec![],
         }
     }
-    
+
     #[test]
     fn test_creation() {
         assert!(PluginDetector::new(test_config()).is_ok());
     }
-    
+
     #[test]
     fn test_detection() {
         let detector = PluginDetector::new(test_config()).unwrap();
@@ -247,7 +250,7 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].detector_id, "test_emp");
     }
-    
+
     #[test]
     fn test_validation() {
         let detector = PluginDetector::new(test_config()).unwrap();
