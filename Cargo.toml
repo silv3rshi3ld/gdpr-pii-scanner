@@ -45,7 +45,7 @@ anyhow = "1.0"
 thiserror = "2.0"
 
 # Document Extraction
-lopdf = "0.39"              # PDF text extraction
+lopdf = "0.40"              # PDF text extraction
 zip = "4.2"                 # DOCX and XLSX support (compatible with calamine 0.32)
 quick-xml = "0.39"          # XML parsing for DOCX
 calamine = "0.32"           # Excel/XLSX parsing - Re-enabled with zip 4.2 compatibility
