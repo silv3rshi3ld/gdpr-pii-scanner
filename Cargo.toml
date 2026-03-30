@@ -52,7 +52,7 @@ calamine = "0.32"           # Excel/XLSX parsing - Re-enabled with zip 4.2 compa
 encoding_rs = "0.8"         # Character encoding detection
 
 # Crypto/Hashing (voor validatie)
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 
 # Entropy berekening
