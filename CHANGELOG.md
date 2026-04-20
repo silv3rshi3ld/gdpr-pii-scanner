@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reason: Eliminates RUSTSEC-2023-0071 (rsa crate Marvin Attack vulnerability)
   - No fix available from upstream maintainers
   - Migration paths: PostgreSQL (recommended) or MongoDB
-  - See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed migration instructions
+  - See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) for detailed migration instructions
   
 - Fixed RUSTSEC-2024-0363 (sqlx binary protocol vulnerability)
 - Fixed RUSTSEC-2024-0421 (idna Punycode labels vulnerability)
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **MySQL/MariaDB Removal:**
 - CLI flag `--db-type mysql` no longer accepted
 - Connection strings starting with `mysql://` not supported
-- Affected users: See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
+- Affected users: See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)
 
 **Recommended alternatives:**
 - **PostgreSQL**: Most SQL-compatible, recommended for relational data
