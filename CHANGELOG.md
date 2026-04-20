@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.1] - 2026-04-20
+
+### Added
+
+- Added `SECURITY.md` with a private vulnerability reporting path
+- Added `CODE_OF_CONDUCT.md`
+- Added GitHub issue templates and a pull request template
+- Added `rust-toolchain.toml` to pin the default toolchain and components
+- Added a tag-driven GitHub Actions release workflow for validation, packaging, and GitHub Releases
+
+### Changed
+
+- Committed `Cargo.lock` for reproducible binary builds
+- Consolidated long-lived project docs under `docs/`
+- Clarified release metadata and repository structure for contributors
+
+### Fixed
+
+- Added the missing annotated `v0.4.0` tag for the original release commit
+- Removed stale scratch and snapshot markdown files from the repository root
+- Deleted the already-merged `feature/database-plugin-system` branch
+- Corrected release-facing docs to match the current repository layout
+
 ## [0.5.0] - 2026-01-28
 
 ### 🔒 Security (BREAKING CHANGES)
@@ -21,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ✨ Added
 
-- SQLite support added to `DatabaseType` enum (implementation coming in v0.5.1)
+- SQLite support added to `DatabaseType` enum (implementation pending a future release)
 - Migration guide for MySQL → PostgreSQL/MongoDB transitions
 
 ### 🐛 Fixed
