@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-20
+
+### Fixed
+
+- Refreshed `Cargo.lock` after the upstream dependency consolidation merged into `main`
+- Aligned the committed lockfile with the published release so binary builds stay reproducible
+
 ## [0.5.1] - 2026-04-20
 
 ### Added

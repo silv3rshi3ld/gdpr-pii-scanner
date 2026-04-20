@@ -4,7 +4,7 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-0.5.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.2-green.svg)](CHANGELOG.md)
 
 PII-Radar is a blazing-fast command-line tool that scans files and databases for Personally Identifiable Information (PII) across European countries. Built with Rust for maximum performance and safety, with extensible plugin architecture for custom detectors.
 
