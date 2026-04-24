@@ -135,19 +135,17 @@ impl MongoScanner {
             }
 
             match value {
-                Bson::String(text) => {
-                    if !text.is_empty() {
-                        let path = PathBuf::from(format!("{}:{}", collection, field_name));
+                Bson::String(text) if !text.is_empty() => {
+                    let path = PathBuf::from(format!("{}:{}", collection, field_name));
 
-                        // Run all detectors on the field value
-                        for detector in self.registry.all() {
-                            let detector_matches = detector.detect(text, &path);
+                    // Run all detectors on the field value
+                    for detector in self.registry.all() {
+                        let detector_matches = detector.detect(text, &path);
 
-                            // Add database-specific metadata to matches
-                            for mut m in detector_matches {
-                                m.location.line = doc_num;
-                                matches.push(m);
-                            }
+                        // Add database-specific metadata to matches
+                        for mut m in detector_matches {
+                            m.location.line = doc_num;
+                            matches.push(m);
                         }
                     }
                 }
@@ -168,18 +166,15 @@ impl MongoScanner {
                         let array_field = format!("{}[{}]", field_name, idx);
 
                         match item {
-                            Bson::String(text) => {
-                                if !text.is_empty() {
-                                    let path =
-                                        PathBuf::from(format!("{}:{}", collection, array_field));
+                            Bson::String(text) if !text.is_empty() => {
+                                let path = PathBuf::from(format!("{}:{}", collection, array_field));
 
-                                    for detector in self.registry.all() {
-                                        let detector_matches = detector.detect(text, &path);
+                                for detector in self.registry.all() {
+                                    let detector_matches = detector.detect(text, &path);
 
-                                        for mut m in detector_matches {
-                                            m.location.line = doc_num;
-                                            matches.push(m);
-                                        }
+                                    for mut m in detector_matches {
+                                        m.location.line = doc_num;
+                                        matches.push(m);
                                     }
                                 }
                             }

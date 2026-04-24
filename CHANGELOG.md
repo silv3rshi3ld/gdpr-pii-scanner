@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-24
+
+### Security
+
+- Resolved 10 RUSTSEC advisories surfaced by `cargo audit`:
+  - `aws-lc-sys` (RUSTSEC-2026-0044, -0045, -0046, -0047, -0048)
+  - `rustls-webpki` (RUSTSEC-2026-0049, -0098, -0099, -0104)
+  - `quinn-proto` RUSTSEC-2026-0037 (DoS)
+  - `bytes` RUSTSEC-2026-0007 (`BytesMut::reserve` integer overflow)
+- Refreshed transitive dependencies via `cargo update` so the lockfile no longer pulls affected versions
+
+### Fixed
+
+- Cleared two `clippy::collapsible_match` errors in `src/database/mongodb.rs` that were breaking the `Lint` and `Validate` CI jobs on Rust 1.95
+- CI and Release workflows now pass end-to-end again
+
 ## [0.5.2] - 2026-04-20
 
 ### Fixed
