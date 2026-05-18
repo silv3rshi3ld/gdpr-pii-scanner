@@ -62,7 +62,7 @@ ordered-float = "5.1"
 # Note: MySQL support removed to eliminate rsa crate vulnerability (RUSTSEC-2023-0071)
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "sqlite"], optional = true }
 mongodb = { version = "3.5", optional = true }
-tokio = { version = "1.35", features = ["full"], optional = true }
+tokio = { version = "1.52", features = ["full"], optional = true }
 futures = { version = "0.3", optional = true }
 
 # Logging
