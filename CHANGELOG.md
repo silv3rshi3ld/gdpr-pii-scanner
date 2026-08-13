@@ -4,6 +4,13 @@ Notable changes are recorded here. Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-13
+
+### Fixed
+
+- Corrected `sqlx` dynamic SQL safety handling for PostgreSQL table scans by asserting trusted query construction with `AssertSqlSafe`.
+- Updated `Cargo.lock` to match the released crate version for `--locked` CI and release checks.
+
 ## [0.6.1] - 2026-08-13
 
 ### Changed
@@ -164,7 +171,8 @@ Notable changes are recorded here. Dates use `YYYY-MM-DD`.
 - Added parallel directory scanning, terminal and JSON output, `.pii-ignore`, context analysis, thread controls, and file-size limits.
 
 [0.5.3]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.2...v0.5.3
-[Unreleased]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.3...v0.6.0
 [0.5.2]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.1...v0.5.2
