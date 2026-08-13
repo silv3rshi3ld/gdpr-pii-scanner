@@ -1,10 +1,10 @@
 [package]
 name = "pii-radar"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.88"
 authors = ["PII-Radar Contributors"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "PII and secret scanner for files, HTTP responses, PostgreSQL, and MongoDB"
 repository = "https://github.com/silv3rshi3ld/gdpr-pii-scanner"
 readme = "README.md"
@@ -54,7 +54,7 @@ ordered-float = "5.1"
 
 # Database connectivity (optional feature for database scanning)
 # Note: MySQL support removed to eliminate rsa crate vulnerability (RUSTSEC-2023-0071)
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"], optional = true }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres"], optional = true }
 mongodb = { version = "3.8", optional = true }
 tokio = { version = "1.35", features = ["full"], optional = true }
 futures = { version = "0.3", optional = true }

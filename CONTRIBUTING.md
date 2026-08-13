@@ -53,4 +53,4 @@ TOML plugins use `schema_version = 1`; see [plugin documentation](docs/plugins.m
 
 Keep unrelated refactors separate. In the pull request description, state the problem, the chosen approach, user-visible changes, checks run, and any security or privacy implications. Maintainers may ask for smaller commits or compatibility notes when a change affects the CLI, library API, output schema, or plugin schema.
 
-By contributing, you agree that your contribution may be licensed under the repository's MIT or Apache-2.0 terms.
+By contributing, you agree that your contribution may be licensed under the repository's Apache-2.0 terms.

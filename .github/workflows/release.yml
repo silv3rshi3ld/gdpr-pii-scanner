@@ -158,7 +158,7 @@ jobs:
           stage="${RUNNER_TEMP}/${package}"
           mkdir -p "${stage}"
           cp "target/${{ matrix.platform.target }}/release/pii-radar" "${stage}/"
-          cp README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md .pii-ignore LICENSE-MIT LICENSE-APACHE "${stage}/"
+          cp README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md .pii-ignore LICENSE-APACHE "${stage}/"
           cp -R docs examples "${stage}/"
           tar -C "${RUNNER_TEMP}" -czf "${package}.tar.gz" "${package}"
 
@@ -170,7 +170,7 @@ jobs:
           $stage = Join-Path $env:RUNNER_TEMP $package
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           Copy-Item "target/${{ matrix.platform.target }}/release/pii-radar.exe" $stage
-          Copy-Item README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, .pii-ignore, LICENSE-MIT, LICENSE-APACHE $stage
+          Copy-Item README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, .pii-ignore, LICENSE-APACHE $stage
           Copy-Item docs, examples $stage -Recurse
           Compress-Archive -Path $stage -DestinationPath "${package}.zip"
 

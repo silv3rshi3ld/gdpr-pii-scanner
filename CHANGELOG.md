@@ -4,6 +4,18 @@ Notable changes are recorded here. Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-13
+
+### Changed
+
+- Adopted an Apache-2.0-only licensing model by removing the MIT license artifact and updating project references.
+- Refreshed dependency versions and `Cargo.lock` after the `sqlx` upgrade and related transitive compatibility updates.
+- Updated release packaging to include `LICENSE-APACHE` only.
+
+### Fixed
+
+- Resolved package publication friction from stale package metadata and single-license mismatches during release packaging.
+
 ## [0.6.0] - 2026-08-13
 
 ### Added
@@ -152,7 +164,8 @@ Notable changes are recorded here. Dates use `YYYY-MM-DD`.
 - Added parallel directory scanning, terminal and JSON output, `.pii-ignore`, context analysis, thread controls, and file-size limits.
 
 [0.5.3]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.2...v0.5.3
-[Unreleased]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.3...v0.6.0
 [0.5.2]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.0...v0.5.1

@@ -110,4 +110,4 @@ The x86-64 GNU/Linux release archive is built on Ubuntu 22.04 to keep its glibc 
 
 ## Licence
 
-PII Radar is available under either the [MIT licence](LICENSE-MIT) or the [Apache License 2.0](LICENSE-APACHE).
+PII Radar is available under the [Apache License 2.0](LICENSE-APACHE).
