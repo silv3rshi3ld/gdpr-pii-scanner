@@ -1,5 +1,103 @@
 /// Detector trait that all PII detectors must implement
-use crate::core::types::{Match, Severity};
+use crate::core::types::{Confidence, Match, Severity};
+use std::path::Path;
+
+/// Result of a bounded detector invocation.
+///
+/// `omitted_matches` is the number of qualifying matches that were observed
+/// after the retention limit was reached. When [`Self::truncated`] is true,
+/// more unobserved matches may also exist because first-party detectors stop
+/// work after observing the first overflow.
+#[derive(Debug, Clone, Default)]
+pub struct DetectionOutcome {
+    /// Matches retained by the detector, never more than the requested limit.
+    pub matches: Vec<Match>,
+    /// Whether at least one qualifying match was not retained.
+    pub truncated: bool,
+    /// Qualifying matches observed but not retained (a lower bound if truncated).
+    pub omitted_matches: usize,
+}
+
+impl DetectionOutcome {
+    /// Collect a lazy candidate iterator with confidence filtering and a hard
+    /// allocation bound.
+    ///
+    /// Iteration stops after the first qualifying overflow, so
+    /// `omitted_matches` is a lower bound when `truncated` is true.
+    pub fn from_iter<I>(candidates: I, minimum_confidence: Confidence, limit: usize) -> Self
+    where
+        I: IntoIterator<Item = Match>,
+    {
+        let mut collector = LimitedMatchCollector::new(minimum_confidence, limit);
+        for candidate in candidates {
+            if !collector.push(candidate) {
+                break;
+            }
+        }
+        collector.finish()
+    }
+
+    fn from_complete(
+        mut matches: Vec<Match>,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> Self {
+        matches.retain(|candidate| candidate.confidence >= minimum_confidence);
+        let omitted_matches = matches.len().saturating_sub(limit);
+        matches.truncate(limit);
+        Self {
+            matches,
+            truncated: omitted_matches > 0,
+            omitted_matches,
+        }
+    }
+}
+
+/// Internal collector used by first-party detectors with nested candidate
+/// loops. It retains at most `limit` matches and asks the caller to stop after
+/// observing the first qualifying overflow.
+pub(crate) struct LimitedMatchCollector {
+    minimum_confidence: Confidence,
+    limit: usize,
+    matches: Vec<Match>,
+    truncated: bool,
+    omitted_matches: usize,
+}
+
+impl LimitedMatchCollector {
+    pub(crate) fn new(minimum_confidence: Confidence, limit: usize) -> Self {
+        Self {
+            minimum_confidence,
+            limit,
+            matches: Vec::with_capacity(limit.min(256)),
+            truncated: false,
+            omitted_matches: 0,
+        }
+    }
+
+    /// Returns `false` after observing the first qualifying overflow.
+    pub(crate) fn push(&mut self, candidate: Match) -> bool {
+        if candidate.confidence < self.minimum_confidence {
+            return true;
+        }
+        if self.matches.len() < self.limit {
+            self.matches.push(candidate);
+            true
+        } else {
+            self.truncated = true;
+            self.omitted_matches = self.omitted_matches.saturating_add(1);
+            false
+        }
+    }
+
+    pub(crate) fn finish(self) -> DetectionOutcome {
+        DetectionOutcome {
+            matches: self.matches,
+            truncated: self.truncated,
+            omitted_matches: self.omitted_matches,
+        }
+    }
+}
 
 /// Trait for PII detectors
 ///
@@ -26,7 +124,8 @@ pub trait Detector: Send + Sync {
 
     /// Base severity level for matches from this detector
     ///
-    /// Note: Severity can be upgraded by context analysis
+    /// Context analysis may enrich the GDPR category, but does not rewrite
+    /// detector-defined severity.
     fn base_severity(&self) -> Severity;
 
     /// Detect PII in the given text
@@ -44,7 +143,25 @@ pub trait Detector: Send + Sync {
     /// # Returns
     ///
     /// Vector of matches found. Empty vector if no matches.
-    fn detect(&self, text: &str, file_path: &std::path::Path) -> Vec<Match>;
+    fn detect(&self, text: &str, file_path: &Path) -> Vec<Match>;
+
+    /// Detect matches while applying confidence filtering before a hard result
+    /// limit.
+    ///
+    /// The default preserves source compatibility for third-party detector
+    /// implementations by calling [`Self::detect`] and then filtering. It
+    /// reports an exact overflow count, but may temporarily allocate every
+    /// candidate. First-party and performance-sensitive detectors should
+    /// override this method and stop after the first qualifying overflow.
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        DetectionOutcome::from_complete(self.detect(text, file_path), minimum_confidence, limit)
+    }
 
     /// Optional: Validate a specific value
     ///

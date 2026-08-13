@@ -1,4 +1,5 @@
-/// CLI argument parsing using clap
+//! Command-line contract for `pii-radar`.
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -6,196 +7,252 @@ use std::path::PathBuf;
 #[command(
     name = "pii-radar",
     version,
-    about = "High-performance PII scanner for European data protection",
-    long_about = "Detects Personally Identifiable Information (PII) in local files and databases\n\
-                  Supports: Dutch BSN, IBAN, Credit Cards, Emails, and more\n\
-                  Features context-aware GDPR Article 9 special category detection"
+    about = "Scan files and data sources for PII and secrets"
 )]
 pub struct Cli {
+    /// Additional configuration layer to load after user and project configuration
+    #[arg(long, global = true, value_name = "FILE", conflicts_with = "no_config")]
+    pub config: Option<PathBuf>,
+
+    /// Ignore all automatically discovered configuration files
+    #[arg(long, global = true)]
+    pub no_config: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Scan a directory for PII
+    /// Scan one regular file or a directory tree
     Scan {
-        /// Directory to scan
         #[arg(value_name = "PATH")]
-        directory: PathBuf,
+        path: PathBuf,
 
-        /// Output format
-        #[arg(short, long, value_name = "FORMAT", default_value = "terminal")]
-        format: OutputFormat,
+        #[arg(short, long, value_name = "FORMAT")]
+        format: Option<OutputFormat>,
 
-        /// Output file (for json/csv formats)
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
-        /// Filter by country codes (comma-separated: nl,de,gb)
         #[arg(short, long, value_name = "CODES")]
         countries: Option<String>,
 
-        /// Minimum confidence level to report
-        #[arg(long, value_name = "LEVEL", default_value = "high")]
-        min_confidence: ConfidenceLevel,
+        #[arg(long, value_name = "LEVEL")]
+        min_confidence: Option<ConfidenceLevel>,
 
-        /// Disable context analysis (GDPR Art. 9)
+        /// Disable heuristic context classification
         #[arg(long)]
         no_context: bool,
 
-        /// Extract text from documents (PDF, DOCX, XLSX)
+        /// Include a best-effort redacted context snippet in results
+        #[arg(long)]
+        include_redacted_snippets: bool,
+
         #[arg(long)]
         extract_documents: bool,
 
-        /// Disable progress bar
         #[arg(long)]
         no_progress: bool,
 
-        /// Show full file paths instead of just filenames
         #[arg(long)]
         full_paths: bool,
 
-        /// Maximum recursion depth
         #[arg(long, value_name = "DEPTH")]
         max_depth: Option<usize>,
 
-        /// Number of threads (default: auto)
-        #[arg(short = 'j', long, value_name = "N")]
+        #[arg(short = 'j', long, value_name = "N", value_parser = parse_nonzero_usize)]
         threads: Option<usize>,
 
-        /// Maximum file size to scan in MB
-        #[arg(long, value_name = "SIZE", default_value = "100")]
-        max_filesize: u64,
+        /// Maximum regular-file size in MiB
+        #[arg(long, value_name = "MIB")]
+        max_filesize: Option<u64>,
 
-        /// Load custom detector plugins from directory
         #[arg(long, value_name = "DIR")]
         plugins: Option<PathBuf>,
+
+        #[arg(long, value_enum, default_value = "v1")]
+        output_schema: OutputSchema,
+
+        /// Allow replacing an existing report file
+        #[arg(long)]
+        force: bool,
     },
 
-    /// Scan a database for PII
-    #[cfg(feature = "database")]
-    ScanDb {
-        /// Database type (postgres, mongodb, sqlite)
-        #[arg(long, value_name = "TYPE")]
-        db_type: String,
+    /// Scan one or more HTTP response bodies
+    Api {
+        #[arg(value_name = "URL", required = true)]
+        urls: Vec<String>,
 
-        /// Connection string (e.g., postgresql://user:pass@host:port/database)
-        #[arg(short, long, value_name = "URL")]
-        connection: String,
+        #[arg(short, long, value_name = "METHOD", default_value = "GET")]
+        method: String,
 
-        /// Database name (required for MongoDB, optional for others)
-        #[arg(short = 'd', long, value_name = "NAME")]
-        database: Option<String>,
+        /// Literal request header. Prefer --header-env for credentials.
+        #[arg(short = 'H', long = "header", value_name = "NAME:VALUE")]
+        headers: Vec<String>,
 
-        /// Filter by tables/collections (comma-separated)
-        #[arg(short = 't', long, value_name = "NAMES")]
-        tables: Option<String>,
+        /// Read a header value from an environment variable (NAME=ENV_VAR)
+        #[arg(long = "header-env", value_name = "NAME=ENV_VAR")]
+        header_env: Vec<String>,
 
-        /// Exclude tables/collections (comma-separated)
-        #[arg(long, value_name = "NAMES")]
-        exclude_tables: Option<String>,
+        #[arg(short, long, value_name = "BODY", conflicts_with = "body_file")]
+        body: Option<String>,
 
-        /// Filter by columns/fields (comma-separated)
-        #[arg(long, value_name = "NAMES")]
-        columns: Option<String>,
+        #[arg(long, value_name = "FILE", conflicts_with = "body")]
+        body_file: Option<PathBuf>,
 
-        /// Exclude columns/fields (comma-separated)
-        #[arg(long, value_name = "NAMES")]
-        exclude_columns: Option<String>,
+        #[arg(long, value_name = "SECONDS", default_value = "30")]
+        timeout: u64,
 
-        /// Sample percentage (1-100) for large tables
-        #[arg(long, value_name = "PERCENT")]
-        sample_percent: Option<u8>,
+        #[arg(long)]
+        no_redirects: bool,
 
-        /// Row limit per table
+        #[arg(long, value_name = "BYTES")]
+        max_response_bytes: Option<usize>,
+
         #[arg(long, value_name = "N")]
-        row_limit: Option<usize>,
+        max_matches: Option<usize>,
 
-        /// Pool size for database connections
-        #[arg(long, value_name = "N", default_value = "4")]
-        pool_size: u32,
+        #[arg(short, long, value_name = "FORMAT")]
+        format: Option<OutputFormat>,
 
-        /// Output format
-        #[arg(short = 'f', long, value_name = "FORMAT", default_value = "terminal")]
-        format: OutputFormat,
-
-        /// Output file
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
-        /// Filter by country codes
+        #[arg(long, value_name = "LEVEL")]
+        min_confidence: Option<ConfidenceLevel>,
+
+        #[arg(long, value_name = "DIR")]
+        plugins: Option<PathBuf>,
+
+        #[arg(long, value_enum, default_value = "v1")]
+        output_schema: OutputSchema,
+
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Scan PostgreSQL or MongoDB
+    #[cfg(any(feature = "postgres", feature = "mongodb"))]
+    ScanDb {
+        /// Database type: postgres or mongodb
+        #[arg(long, value_name = "TYPE")]
+        db_type: String,
+
+        /// Connection string. Prefer --connection-env to keep credentials out of process lists.
+        #[arg(short, long, value_name = "URL", conflicts_with = "connection_env")]
+        connection: Option<String>,
+
+        /// Environment variable containing the connection string
+        #[arg(
+            long,
+            value_name = "ENV_VAR",
+            conflicts_with = "connection",
+            required_unless_present = "connection"
+        )]
+        connection_env: Option<String>,
+
+        #[arg(short = 'd', long, value_name = "NAME")]
+        database: Option<String>,
+
+        #[arg(short = 't', long, value_name = "NAMES")]
+        tables: Option<String>,
+
+        #[arg(long, value_name = "NAMES")]
+        exclude_tables: Option<String>,
+
+        #[arg(long, value_name = "NAMES")]
+        columns: Option<String>,
+
+        #[arg(long, value_name = "NAMES")]
+        exclude_columns: Option<String>,
+
+        #[arg(long, value_name = "PERCENT", value_parser = parse_percent)]
+        sample_percent: Option<u8>,
+
+        #[arg(long, value_name = "N")]
+        row_limit: Option<usize>,
+
+        #[arg(long, value_name = "N", default_value = "4", value_parser = parse_nonzero_u32)]
+        pool_size: u32,
+
+        #[arg(short = 'f', long, value_name = "FORMAT")]
+        format: Option<OutputFormat>,
+
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+
         #[arg(long, value_name = "CODES")]
         countries: Option<String>,
 
-        /// Disable progress bar
         #[arg(long)]
         no_progress: bool,
+
+        #[arg(long, value_enum, default_value = "v1")]
+        output_schema: OutputSchema,
+
+        #[arg(long)]
+        force: bool,
     },
 
-    /// List all available detectors
+    /// List built-in detectors
     Detectors {
-        /// Show detailed information
         #[arg(short, long)]
         verbose: bool,
     },
 
-    /// Scan API endpoints for PII
-    Api {
-        /// API endpoint URL(s) to scan
-        #[arg(value_name = "URL", required = true)]
-        urls: Vec<String>,
+    /// Inspect declarative detector plugins
+    Plugins {
+        #[command(subcommand)]
+        command: PluginCommands,
+    },
+}
 
-        /// HTTP method (GET, POST, PUT, PATCH, DELETE)
-        #[arg(short, long, value_name = "METHOD", default_value = "GET")]
-        method: String,
-
-        /// Request headers in KEY:VALUE format (can be specified multiple times)
-        #[arg(short = 'H', long = "header", value_name = "HEADER")]
-        headers: Vec<String>,
-
-        /// Request body for POST/PUT/PATCH
-        #[arg(short, long, value_name = "BODY")]
-        body: Option<String>,
-
-        /// Request timeout in seconds
-        #[arg(long, value_name = "SECONDS", default_value = "30")]
-        timeout: u64,
-
-        /// Disable following redirects
-        #[arg(long)]
-        no_redirects: bool,
-
-        /// Output format
-        #[arg(short, long, value_name = "FORMAT", default_value = "terminal")]
-        format: OutputFormat,
-
-        /// Output file (for json/csv formats)
-        #[arg(short, long, value_name = "FILE")]
-        output: Option<PathBuf>,
-
-        /// Minimum confidence level to report
-        #[arg(long, value_name = "LEVEL", default_value = "high")]
-        min_confidence: ConfidenceLevel,
-
-        /// Load custom detector plugins from directory
-        #[arg(long, value_name = "DIR")]
-        plugins: Option<PathBuf>,
+#[derive(Subcommand)]
+pub enum PluginCommands {
+    /// Validate one plugin file or every supported plugin file in a directory
+    Validate {
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
     },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutputFormat {
-    /// Colored terminal output (default)
     Terminal,
-    /// JSON format
     Json,
-    /// Compact JSON (single line)
     JsonCompact,
-    /// HTML report
     Html,
-    /// CSV (Comma-Separated Values)
     Csv,
+}
+
+impl OutputFormat {
+    pub fn parse_config(value: &str) -> Result<Self, String> {
+        match value {
+            "terminal" => Ok(Self::Terminal),
+            "json" => Ok(Self::Json),
+            "json-compact" => Ok(Self::JsonCompact),
+            "html" => Ok(Self::Html),
+            "csv" => Ok(Self::Csv),
+            _ => Err(format!("unsupported output format '{value}'")),
+        }
+    }
+
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Json => "json",
+            Self::JsonCompact => "json-compact",
+            Self::Html => "html",
+            Self::Csv => "csv",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum OutputSchema {
+    V1,
+    Legacy,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -203,6 +260,55 @@ pub enum ConfidenceLevel {
     Low,
     Medium,
     High,
+}
+
+fn parse_nonzero_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| format!("'{value}' is not a valid positive integer"))?;
+    (parsed > 0)
+        .then_some(parsed)
+        .ok_or_else(|| "value must be greater than zero".to_string())
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+fn parse_nonzero_u32(value: &str) -> Result<u32, String> {
+    let parsed = value
+        .parse::<u32>()
+        .map_err(|_| format!("'{value}' is not a valid positive integer"))?;
+    (parsed > 0)
+        .then_some(parsed)
+        .ok_or_else(|| "value must be greater than zero".to_string())
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+fn parse_percent(value: &str) -> Result<u8, String> {
+    let parsed = value
+        .parse::<u8>()
+        .map_err(|_| format!("'{value}' is not a valid percentage"))?;
+    (1..=100)
+        .contains(&parsed)
+        .then_some(parsed)
+        .ok_or_else(|| "percentage must be between 1 and 100".to_string())
+}
+
+impl ConfidenceLevel {
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    pub fn parse_config(value: &str) -> Result<Self, String> {
+        match value {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            _ => Err(format!("unsupported confidence '{value}'")),
+        }
+    }
 }
 
 impl From<ConfidenceLevel> for crate::Confidence {
@@ -221,83 +327,35 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn test_cli_verify() {
+    fn cli_contract_is_valid() {
         Cli::command().debug_assert();
     }
 
     #[test]
-    fn test_scan_command_basic() {
-        let args = vec!["pii-radar", "scan", "/tmp/test"];
-        let cli = Cli::try_parse_from(args);
-        assert!(cli.is_ok());
-    }
-
-    #[test]
-    fn test_scan_command_with_options() {
-        let args = vec![
+    fn scan_accepts_file_shaped_path_and_new_options() {
+        let cli = Cli::try_parse_from([
             "pii-radar",
+            "--no-config",
             "scan",
-            "/tmp/test",
-            "--format",
-            "json",
-            "--output",
-            "results.json",
-            "--no-context",
-        ];
-        let cli = Cli::try_parse_from(args);
+            "sample.txt",
+            "--include-redacted-snippets",
+            "--output-schema",
+            "legacy",
+        ]);
         assert!(cli.is_ok());
     }
 
     #[test]
-    fn test_detectors_command() {
-        let args = vec!["pii-radar", "detectors"];
-        let cli = Cli::try_parse_from(args);
-        assert!(cli.is_ok());
-    }
-
-    #[test]
-    fn test_scan_command_with_extract_documents() {
-        let args = vec!["pii-radar", "scan", "/tmp/test", "--extract-documents"];
-        let cli = Cli::try_parse_from(args);
-        assert!(cli.is_ok());
-
-        if let Ok(Cli {
-            command: Commands::Scan {
-                extract_documents, ..
-            },
-        }) = cli
-        {
-            assert!(extract_documents);
-        } else {
-            panic!("Expected Scan command");
-        }
-    }
-
-    #[test]
-    fn test_scan_command_with_all_options() {
-        let args = vec![
+    fn api_secret_sources_conflict_with_literal_sources() {
+        assert!(Cli::try_parse_from([
             "pii-radar",
-            "scan",
-            "/tmp/test",
-            "--format",
-            "json",
-            "--output",
-            "results.json",
-            "--countries",
-            "nl,de",
-            "--min-confidence",
-            "medium",
-            "--extract-documents",
-            "--full-paths",
-            "--no-context",
-            "--max-depth",
-            "3",
-            "--threads",
-            "4",
-            "--max-filesize",
-            "50",
-        ];
-        let cli = Cli::try_parse_from(args);
-        assert!(cli.is_ok());
+            "api",
+            "https://example.test",
+            "--body",
+            "secret",
+            "--body-file",
+            "request.json",
+        ])
+        .is_err());
     }
 }

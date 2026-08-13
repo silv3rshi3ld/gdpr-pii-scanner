@@ -1,31 +1,39 @@
-/// Plugin system for loading custom detectors from TOML files
-///
-/// Plugins allow users to define custom pattern-based detectors without writing Rust code.
-/// Plugin files are TOML files located in `~/.pii-radar/plugins/` directory.
-///
-/// Example plugin file (`~/.pii-radar/plugins/my_detector.toml`):
-/// ```toml
-/// [detector]
-/// id = "custom_ssn"
-/// name = "Custom SSN Detector"
-/// country = "xx"
-/// pattern = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
-/// severity = "critical"
-/// confidence = "medium"
-///
-/// [validation]
-/// # Optional: Validation rules
-/// min_length = 11
-/// max_length = 11
-/// checksum = "none"
-/// ```
-use crate::core::{Confidence, Detector, Match, Severity};
+//! Deprecated Rust API for version 0.5 detector plugins.
+//!
+//! New code should use [`crate::detectors::plugin`] and
+//! [`crate::detectors::plugin_loader`]. This module remains as an explicitly
+//! deprecated source-compatibility layer through the 0.6 release line.
+//!
+//! Example legacy plugin file:
+//! ```toml
+//! [detector]
+//! id = "custom_ssn"
+//! name = "Custom SSN Detector"
+//! country = "xx"
+//! pattern = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+//! severity = "critical"
+//! confidence = "medium"
+//!
+//! [validation]
+//! # Optional: Validation rules
+//! min_length = 11
+//! max_length = 11
+//! checksum = "none"
+//! ```
+#![allow(deprecated)]
+
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{Confidence, DetectionOutcome, Detector, Match, Severity, TextIndex};
 use regex::Regex;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Configuration for a custom detector plugin
+#[deprecated(
+    since = "0.6.0",
+    note = "use `pii_radar::PluginConfig` (schema version 1)"
+)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginConfig {
     pub detector: DetectorConfig,
@@ -33,6 +41,10 @@ pub struct PluginConfig {
     pub validation: ValidationConfig,
 }
 
+#[deprecated(
+    since = "0.6.0",
+    note = "use `pii_radar::PluginConfig` (schema version 1)"
+)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DetectorConfig {
     pub id: String,
@@ -47,6 +59,7 @@ pub struct DetectorConfig {
     pub description: Option<String>,
 }
 
+#[deprecated(since = "0.6.0", note = "use `pii_radar::PluginValidationConfig`")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ValidationConfig {
     #[serde(default)]
@@ -59,6 +72,7 @@ pub struct ValidationConfig {
     pub allowed_chars: Option<String>,
 }
 
+#[deprecated(since = "0.6.0", note = "use `pii_radar::Severity`")]
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SeverityLevel {
@@ -68,6 +82,7 @@ pub enum SeverityLevel {
     Critical,
 }
 
+#[deprecated(since = "0.6.0", note = "use `pii_radar::Confidence`")]
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConfidenceLevel {
@@ -76,6 +91,10 @@ pub enum ConfidenceLevel {
     High,
 }
 
+#[deprecated(
+    since = "0.6.0",
+    note = "use the string checksum field on `pii_radar::PluginValidationConfig`"
+)]
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChecksumType {
@@ -130,6 +149,10 @@ impl From<ConfidenceLevel> for Confidence {
 }
 
 /// A custom detector loaded from a plugin file
+#[deprecated(
+    since = "0.6.0",
+    note = "use `pii_radar::PluginDetector` (schema version 1)"
+)]
 pub struct PluginDetector {
     config: PluginConfig,
     pattern: Regex,
@@ -264,10 +287,25 @@ impl Detector for PluginDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        for (line_num, line) in text.lines().enumerate() {
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let confidence = self.config.detector.confidence.into();
+        if confidence < minimum_confidence {
+            return DetectionOutcome::default();
+        }
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
+        let text_index = TextIndex::new(text);
+
+        'scan: for (line_num, line) in text.lines().enumerate() {
             for cap in self.pattern.captures_iter(line) {
                 if let Some(mat) = cap.get(0) {
                     let value = mat.as_str();
@@ -280,29 +318,29 @@ impl Detector for PluginDetector {
                     // Mask the value (show first 3 and last 2 chars)
                     let masked = crate::utils::mask_value(value);
 
-                    matches.push(Match {
+                    if !matches.push(Match {
                         detector_id: self.id().to_string(),
                         detector_name: self.name().to_string(),
                         country: self.country().to_string(),
                         value_masked: masked,
-                        location: crate::core::types::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: mat.start(),
-                            start_byte: byte_offset + mat.start(),
-                            end_byte: byte_offset + mat.end(),
-                        },
-                        confidence: self.config.detector.confidence.into(),
+                        location: text_index.location_from_line_column(
+                            file_path.to_path_buf(),
+                            line_num + 1,
+                            mat.start(),
+                            mat.end() - mat.start(),
+                        ),
+                        confidence,
                         severity: self.base_severity(),
                         context: None,
                         gdpr_category: crate::core::types::GdprCategory::Regular,
-                    });
+                    }) {
+                        break 'scan;
+                    }
                 }
             }
-            byte_offset += line.len() + 1; // +1 for newline
         }
 
-        matches
+        matches.finish()
     }
 
     fn validate(&self, value: &str) -> bool {
@@ -319,41 +357,29 @@ impl Detector for PluginDetector {
 }
 
 /// Load all plugin detectors from the plugins directory
+#[deprecated(since = "0.6.0", note = "use `pii_radar::load_plugins_from_directory`")]
 pub fn load_plugins(plugins_dir: &Path) -> Result<Vec<Box<dyn Detector>>, String> {
     if !plugins_dir.exists() {
         return Ok(Vec::new());
     }
 
-    let mut detectors: Vec<Box<dyn Detector>> = Vec::new();
-
-    let entries = fs::read_dir(plugins_dir)
-        .map_err(|e| format!("Failed to read plugins directory: {}", e))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-        let path = entry.path();
-
-        if path.extension().and_then(|s| s.to_str()) == Some("toml") {
-            match PluginDetector::from_file(&path) {
-                Ok(detector) => {
-                    println!("✅ Loaded plugin: {} ({})", detector.name(), detector.id());
-                    detectors.push(Box::new(detector));
-                }
-                Err(e) => {
-                    eprintln!("⚠️  Failed to load plugin {:?}: {}", path.file_name(), e);
-                }
-            }
-        }
-    }
-
-    Ok(detectors)
+    crate::detectors::plugin_loader::load_plugins_from_directory(plugins_dir).map(|detectors| {
+        detectors
+            .into_iter()
+            .map(|detector| Box::new(detector) as Box<dyn Detector>)
+            .collect()
+    })
 }
 
 /// Get the default plugins directory path
+#[deprecated(
+    since = "0.6.0",
+    note = "use configured plugin directories instead of this legacy helper"
+)]
 pub fn default_plugins_dir() -> PathBuf {
-    dirs::home_dir()
+    dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".pii-radar")
+        .join("pii-radar")
         .join("plugins")
 }
 
@@ -458,7 +484,7 @@ max_length = 11
     #[test]
     fn test_load_plugins_from_directory() {
         let temp_dir = TempDir::new().unwrap();
-        let plugin_path = temp_dir.path().join("test_plugin.toml");
+        let plugin_path = temp_dir.path().join("test_plugin.detector.toml");
 
         let toml_content = r#"
 [detector]

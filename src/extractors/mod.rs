@@ -2,8 +2,50 @@
 ///
 /// This module provides a trait-based system for extracting text from various
 /// document formats to enable PII scanning in non-plaintext files.
+use crate::safe_io::{open_regular_file, with_private_snapshot, OpenedRegularFile, SafeFileError};
 use std::path::Path;
 use thiserror::Error;
+
+/// Default safety budgets for document extraction.
+#[derive(Debug, Clone, Copy)]
+pub struct ExtractionLimits {
+    pub max_input_bytes: u64,
+    pub max_output_bytes: usize,
+    pub max_pdf_pages: usize,
+    pub max_workbook_sheets: usize,
+    pub max_workbook_cells: usize,
+    pub max_archive_expansion_ratio: u64,
+}
+
+impl Default for ExtractionLimits {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: 100 * 1024 * 1024,
+            max_output_bytes: 100 * 1024 * 1024,
+            max_pdf_pages: 10_000,
+            max_workbook_sheets: 1_024,
+            max_workbook_cells: 1_000_000,
+            max_archive_expansion_ratio: 100,
+        }
+    }
+}
+
+impl ExtractionLimits {
+    pub(crate) fn validate(&self) -> Result<(), ExtractorError> {
+        if self.max_input_bytes == 0
+            || self.max_output_bytes == 0
+            || self.max_pdf_pages == 0
+            || self.max_workbook_sheets == 0
+            || self.max_workbook_cells == 0
+            || self.max_archive_expansion_ratio == 0
+        {
+            return Err(ExtractorError::LimitExceeded(
+                "extraction limits must be greater than zero".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 pub mod docx;
 pub mod pdf;
@@ -33,6 +75,39 @@ pub enum ExtractorError {
     /// Extraction failed for another reason
     #[error("Extraction failed: {0}")]
     ExtractionFailed(String),
+
+    /// A configured resource budget was exceeded.
+    #[error("Extraction limit exceeded: {0}")]
+    LimitExceeded(String),
+}
+
+impl From<SafeFileError> for ExtractorError {
+    fn from(error: SafeFileError) -> Self {
+        match error {
+            SafeFileError::Io(error) => Self::IoError(error),
+            SafeFileError::NotRegular => Self::UnsupportedFormat,
+            SafeFileError::TooLarge { actual, maximum } => Self::LimitExceeded(format!(
+                "input is {} bytes; maximum is {} bytes",
+                actual, maximum
+            )),
+            SafeFileError::InvalidUtf8(error) => Self::CorruptedFile(error.to_string()),
+        }
+    }
+}
+
+pub(crate) fn append_limited(
+    destination: &mut String,
+    value: &str,
+    max_bytes: usize,
+) -> Result<(), ExtractorError> {
+    if destination.len().saturating_add(value.len()) > max_bytes {
+        return Err(ExtractorError::LimitExceeded(format!(
+            "extracted text exceeds {} bytes",
+            max_bytes
+        )));
+    }
+    destination.push_str(value);
+    Ok(())
 }
 
 /// Trait for extracting text from document formats
@@ -54,6 +129,51 @@ pub trait TextExtractor: Send + Sync {
     /// * `Ok(String)` - Extracted text content
     /// * `Err(ExtractorError)` - If extraction fails
     fn extract(&self, path: &Path) -> Result<String, ExtractorError>;
+
+    /// Extract text under explicit resource budgets.
+    ///
+    /// The default keeps third-party extractors source-compatible and checks
+    /// their result. Built-in extractors override this method to enforce limits
+    /// incrementally while parsing.
+    fn extract_with_limits(
+        &self,
+        path: &Path,
+        limits: ExtractionLimits,
+    ) -> Result<String, ExtractorError> {
+        limits.validate()?;
+        let opened = open_regular_file(path, limits.max_input_bytes)?;
+        self.extract_opened_with_limits(path, opened, limits)
+    }
+
+    /// Extract from an already-opened and handle-validated source.
+    ///
+    /// The default preserves compatibility for path-only third-party
+    /// extractors by giving them a private bounded snapshot. Built-in
+    /// extractors override this method and parse the opened source bytes
+    /// directly.
+    #[doc(hidden)]
+    fn extract_opened_with_limits(
+        &self,
+        source_path: &Path,
+        opened: OpenedRegularFile,
+        limits: ExtractionLimits,
+    ) -> Result<String, ExtractorError> {
+        limits.validate()?;
+        let text = with_private_snapshot(
+            source_path,
+            opened,
+            limits.max_input_bytes,
+            |snapshot_path| self.extract(snapshot_path),
+        )??;
+        if text.len() > limits.max_output_bytes {
+            return Err(ExtractorError::LimitExceeded(format!(
+                "extracted text is {} bytes; maximum is {} bytes",
+                text.len(),
+                limits.max_output_bytes
+            )));
+        }
+        Ok(text)
+    }
 
     /// Get the file extensions supported by this extractor
     ///
@@ -143,5 +263,38 @@ mod tests {
     fn test_extractor_name() {
         let extractor = MockExtractor::new(vec![]);
         assert_eq!(extractor.name(), "Mock Extractor");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_only_extractor_receives_a_snapshot_of_the_opened_source() {
+        struct ReadingExtractor;
+
+        impl TextExtractor for ReadingExtractor {
+            fn extract(&self, path: &Path) -> Result<String, ExtractorError> {
+                Ok(std::fs::read_to_string(path)?)
+            }
+
+            fn supported_extensions(&self) -> Vec<&str> {
+                vec!["txt"]
+            }
+
+            fn name(&self) -> &str {
+                "Reading Extractor"
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.txt");
+        let moved = directory.path().join("moved.txt");
+        std::fs::write(&source, "original").unwrap();
+        let opened = open_regular_file(&source, 1024).unwrap();
+        std::fs::rename(&source, &moved).unwrap();
+        std::fs::write(&source, "replacement").unwrap();
+
+        let text = ReadingExtractor
+            .extract_opened_with_limits(&source, opened, ExtractionLimits::default())
+            .unwrap();
+        assert_eq!(text, "original");
     }
 }

@@ -2,7 +2,8 @@
 ///
 /// Detects IBANs for all EU countries using modulo-97 validation.
 /// Supports all SEPA countries and additional European countries.
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity};
 use crate::utils::{mask_iban, validate_iban};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -47,10 +48,21 @@ impl Detector for IbanDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        for (line_num, line) in text.lines().enumerate() {
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
+        let text_index = crate::core::types::TextIndex::new(text);
+
+        'scan: for (line_num, line) in text.lines().enumerate() {
             for capture in IBAN_PATTERN.find_iter(line) {
                 let matched_text = capture.as_str();
 
@@ -60,30 +72,29 @@ impl Detector for IbanDetector {
                 if is_valid {
                     let country_code = &matched_text[..2];
 
-                    matches.push(Match {
+                    if !matches.push(Match {
                         detector_id: self.id().to_string(),
                         detector_name: format!("{} ({})", self.name(), country_code),
                         country: country_code.to_lowercase(),
                         value_masked: mask_iban(matched_text),
-                        location: crate::core::types::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: capture.start(),
-                            start_byte: byte_offset + capture.start(),
-                            end_byte: byte_offset + capture.end(),
-                        },
+                        location: text_index.location_from_line_column(
+                            file_path.to_path_buf(),
+                            line_num + 1,
+                            capture.start(),
+                            capture.end() - capture.start(),
+                        ),
                         confidence: Confidence::High,
                         severity: self.base_severity(),
                         context: None,
                         gdpr_category: GdprCategory::Regular,
-                    });
+                    }) {
+                        break 'scan;
+                    }
                 }
             }
-
-            byte_offset += line.len() + 1;
         }
 
-        matches
+        matches.finish()
     }
 
     fn validate(&self, value: &str) -> bool {

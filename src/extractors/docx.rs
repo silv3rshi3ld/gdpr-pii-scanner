@@ -1,9 +1,9 @@
 /// DOCX text extraction using zip and quick-xml
-use super::{ExtractorError, TextExtractor};
+use super::{append_limited, ExtractionLimits, ExtractorError, TextExtractor};
+use crate::safe_io::{read_opened_bounded, OpenedRegularFile};
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::fs::File;
-use std::io::Read;
+use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 use zip::ZipArchive;
 
@@ -15,7 +15,18 @@ impl DocxExtractor {
     }
 
     /// Extract text from an XML content part
+    #[cfg(test)]
     fn extract_text_from_xml(xml_content: &str) -> Result<String, ExtractorError> {
+        Self::extract_text_from_xml_with_limit(
+            xml_content,
+            ExtractionLimits::default().max_output_bytes,
+        )
+    }
+
+    fn extract_text_from_xml_with_limit(
+        xml_content: &str,
+        max_output_bytes: usize,
+    ) -> Result<String, ExtractorError> {
         let mut reader = Reader::from_str(xml_content);
         // Don't trim text to preserve spaces
         reader.config_mut().trim_text(false);
@@ -40,7 +51,7 @@ impl DocxExtractor {
                         // Decode the text content from bytes to string
                         match reader.decoder().decode(bytes) {
                             Ok(decoded) => {
-                                text.push_str(&decoded);
+                                append_limited(&mut text, &decoded, max_output_bytes)?;
                             }
                             Err(e) => {
                                 return Err(ExtractorError::ExtractionFailed(format!(
@@ -64,7 +75,7 @@ impl DocxExtractor {
                             "apos" => "'",
                             _ => "", // Unknown entity, skip
                         };
-                        text.push_str(expanded);
+                        append_limited(&mut text, expanded, max_output_bytes)?;
                     }
                 }
                 Ok(Event::End(ref e)) => {
@@ -72,7 +83,7 @@ impl DocxExtractor {
                         in_text_element = false;
                     } else if e.name().as_ref() == b"w:p" {
                         // End of paragraph, add line break
-                        text.push('\n');
+                        append_limited(&mut text, "\n", max_output_bytes)?;
                     }
                 }
                 Ok(Event::Eof) => break,
@@ -91,15 +102,33 @@ impl DocxExtractor {
     }
 
     /// Extract text from a specific XML file in the archive
-    fn extract_from_archive_file(
-        archive: &mut ZipArchive<File>,
+    fn extract_from_archive_file<R: Read + Seek>(
+        archive: &mut ZipArchive<R>,
         file_name: &str,
+        expanded_bytes: &mut u64,
+        max_expanded_bytes: u64,
+        max_output_bytes: usize,
     ) -> Result<String, ExtractorError> {
         match archive.by_name(file_name) {
             Ok(mut file) => {
+                let declared_size = file.size();
+                *expanded_bytes = expanded_bytes.saturating_add(declared_size);
+                if *expanded_bytes > max_expanded_bytes {
+                    return Err(ExtractorError::LimitExceeded(format!(
+                        "DOCX content expands beyond {} bytes",
+                        max_expanded_bytes
+                    )));
+                }
                 let mut content = String::new();
-                file.read_to_string(&mut content)?;
-                Self::extract_text_from_xml(&content)
+                (&mut file)
+                    .take(declared_size.saturating_add(1))
+                    .read_to_string(&mut content)?;
+                if content.len() as u64 > declared_size {
+                    return Err(ExtractorError::LimitExceeded(
+                        "DOCX entry exceeded its declared uncompressed size".to_string(),
+                    ));
+                }
+                Self::extract_text_from_xml_with_limit(&content, max_output_bytes)
             }
             Err(_) => Ok(String::new()), // File doesn't exist, return empty
         }
@@ -108,36 +137,68 @@ impl DocxExtractor {
 
 impl TextExtractor for DocxExtractor {
     fn extract(&self, path: &Path) -> Result<String, ExtractorError> {
-        // Open the DOCX file as a ZIP archive
-        let file = File::open(path)?;
-        let mut archive = ZipArchive::new(file)
+        self.extract_with_limits(path, ExtractionLimits::default())
+    }
+
+    fn extract_opened_with_limits(
+        &self,
+        _source_path: &Path,
+        opened: OpenedRegularFile,
+        limits: ExtractionLimits,
+    ) -> Result<String, ExtractorError> {
+        limits.validate()?;
+        let source = read_opened_bounded(opened, limits.max_input_bytes)?;
+        let input_bytes = source.len() as u64;
+        let mut archive = ZipArchive::new(Cursor::new(source))
             .map_err(|e| ExtractorError::CorruptedFile(format!("Invalid DOCX structure: {}", e)))?;
 
         let mut text = String::new();
+        let mut expanded_bytes = 0_u64;
+        let max_expanded_bytes = input_bytes
+            .saturating_mul(limits.max_archive_expansion_ratio)
+            .min(limits.max_output_bytes as u64);
 
         // Extract main document content
-        let main_content = Self::extract_from_archive_file(&mut archive, "word/document.xml")?;
-        text.push_str(&main_content);
+        let main_content = Self::extract_from_archive_file(
+            &mut archive,
+            "word/document.xml",
+            &mut expanded_bytes,
+            max_expanded_bytes,
+            limits.max_output_bytes,
+        )?;
+        append_limited(&mut text, &main_content, limits.max_output_bytes)?;
 
         // Extract headers (header1.xml, header2.xml, etc.)
         for i in 1..=3 {
             let header_file = format!("word/header{}.xml", i);
-            if let Ok(header_text) = Self::extract_from_archive_file(&mut archive, &header_file) {
-                if !header_text.is_empty() {
-                    text.push_str("\n--- Header ---\n");
-                    text.push_str(&header_text);
-                }
+            let remaining_output = limits.max_output_bytes.saturating_sub(text.len());
+            let header_text = Self::extract_from_archive_file(
+                &mut archive,
+                &header_file,
+                &mut expanded_bytes,
+                max_expanded_bytes,
+                remaining_output,
+            )?;
+            if !header_text.is_empty() {
+                append_limited(&mut text, "\n--- Header ---\n", limits.max_output_bytes)?;
+                append_limited(&mut text, &header_text, limits.max_output_bytes)?;
             }
         }
 
         // Extract footers (footer1.xml, footer2.xml, etc.)
         for i in 1..=3 {
             let footer_file = format!("word/footer{}.xml", i);
-            if let Ok(footer_text) = Self::extract_from_archive_file(&mut archive, &footer_file) {
-                if !footer_text.is_empty() {
-                    text.push_str("\n--- Footer ---\n");
-                    text.push_str(&footer_text);
-                }
+            let remaining_output = limits.max_output_bytes.saturating_sub(text.len());
+            let footer_text = Self::extract_from_archive_file(
+                &mut archive,
+                &footer_file,
+                &mut expanded_bytes,
+                max_expanded_bytes,
+                remaining_output,
+            )?;
+            if !footer_text.is_empty() {
+                append_limited(&mut text, "\n--- Footer ---\n", limits.max_output_bytes)?;
+                append_limited(&mut text, &footer_text, limits.max_output_bytes)?;
             }
         }
 
@@ -280,6 +341,15 @@ mod tests {
         // quick-xml 0.39 automatically unescapes entities during parsing
         // So &amp; becomes &, &lt; becomes <, &gt; becomes >
         assert!(text.contains("Test & Special <chars>"));
+    }
+
+    #[test]
+    fn test_xml_output_limit_is_enforced_incrementally() {
+        let xml = r#"<w:document><w:p><w:t>too much text</w:t></w:p></w:document>"#;
+        assert!(matches!(
+            DocxExtractor::extract_text_from_xml_with_limit(xml, 4),
+            Err(ExtractorError::LimitExceeded(_))
+        ));
     }
 
     // Note: Real DOCX extraction tests with actual documents would require

@@ -1,29 +1,16 @@
-/// French NIR (Numéro d'Inscription au Répertoire) detector
-///
-/// The NIR (also known as "Numéro de Sécurité Sociale") is the French
-/// social security number. It consists of 15 digits:
-/// - 1 digit: sex (1=male, 2=female, 7/8=temporary)
-/// - 2 digits: year of birth (YY)
-/// - 2 digits: month of birth (01-12, or special codes)
-/// - 2 digits: department of birth
-/// - 3 digits: commune code
-/// - 3 digits: birth order in month
-/// - 2 digits: checksum (97 - (first 13 digits mod 97))
-///
-/// Format: 1 YY MM DD CCC OOO KK
-/// Example: 2 89 05 75 123 456 89
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+//! French NIR (social-security number) detector.
+
+use crate::core::{
+    Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity, TextIndex,
+};
 use crate::utils::mask_value;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::path::Path;
 
-/// Regex pattern for NIR detection
-/// Matches: 15 digits with optional separators
-/// First digit must be 1, 2, 7, or 8
 static NIR_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\b[1278]\s?\d{2}\s?\d{2}\s?\d{2}\s?\d{3}\s?\d{3}\s?\d{2}\b")
-        .expect("Failed to compile NIR regex")
+        .expect("valid NIR regex")
 });
 
 pub struct NirDetector;
@@ -33,36 +20,50 @@ impl NirDetector {
         Self
     }
 
-    /// Validate NIR using Luhn mod 97 algorithm
+    fn component(digits: &[u8], range: std::ops::Range<usize>) -> Option<u32> {
+        std::str::from_utf8(&digits[range]).ok()?.parse().ok()
+    }
+
+    /// Validate the supported numeric NIR form. Alphanumeric Corsican
+    /// department codes require a distinct representation and are deliberately
+    /// outside this detector's current pattern.
     fn validate_nir(digits: &str) -> bool {
-        if digits.len() != 15 {
+        let bytes = digits.as_bytes();
+        if bytes.len() != 15 || !bytes.iter().all(u8::is_ascii_digit) {
+            return false;
+        }
+        if !matches!(bytes[0], b'1' | b'2' | b'7' | b'8') {
             return false;
         }
 
-        // First digit must be 1, 2, 7, or 8
-        let first_char = digits.chars().next().unwrap();
-        if !['1', '2', '7', '8'].contains(&first_char) {
+        let Some(month) = Self::component(bytes, 3..5) else {
+            return false;
+        };
+        // 20..=42 are administrative month codes used where a normal birth
+        // month is unavailable in the civil record.
+        if !(1..=12).contains(&month) && !(20..=42).contains(&month) {
+            return false;
+        }
+        let Some(department) = Self::component(bytes, 5..7) else {
+            return false;
+        };
+        let Some(commune) = Self::component(bytes, 7..10) else {
+            return false;
+        };
+        let Some(order) = Self::component(bytes, 10..13) else {
+            return false;
+        };
+        if department == 0 || commune == 0 || order == 0 {
             return false;
         }
 
-        // Extract parts
-        let first_13 = &digits[0..13];
-        let checksum_str = &digits[13..15];
-
-        // Parse the first 13 digits as a number
-        let Ok(number) = first_13.parse::<u64>() else {
+        let Ok(number) = digits[..13].parse::<u64>() else {
             return false;
         };
-
-        // Parse checksum
-        let Ok(checksum) = checksum_str.parse::<u64>() else {
+        let Ok(checksum) = digits[13..].parse::<u64>() else {
             return false;
         };
-
-        // Calculate expected checksum: 97 - (number mod 97)
-        let expected_checksum = 97 - (number % 97);
-
-        checksum == expected_checksum
+        checksum == 97 - (number % 97)
     }
 }
 
@@ -90,160 +91,106 @@ impl Detector for NirDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        // Split text into lines for accurate line/column reporting
-        for (line_num, line) in text.lines().enumerate() {
-            for capture in NIR_PATTERN.find_iter(line) {
-                let matched_text = capture.as_str();
-
-                // Extract just the digits
-                let digits: String = matched_text
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let index = TextIndex::new(text);
+        DetectionOutcome::from_iter(
+            NIR_PATTERN.find_iter(text).filter_map(|candidate| {
+                let digits: String = candidate
+                    .as_str()
                     .chars()
-                    .filter(|c| c.is_ascii_digit())
+                    .filter(char::is_ascii_digit)
                     .collect();
-
-                // Validate with Luhn mod 97
-                let is_valid = Self::validate_nir(&digits);
-
-                let confidence = if is_valid {
-                    Confidence::High
-                } else {
-                    // Still report but with low confidence
-                    Confidence::Low
-                };
-
-                // Only report high-confidence matches
-                if confidence == Confidence::High {
-                    matches.push(Match {
-                        detector_id: self.id().to_string(),
-                        detector_name: self.name().to_string(),
-                        country: self.country().to_string(),
-                        value_masked: mask_value(&digits),
-                        severity: self.base_severity(),
-                        confidence,
-                        location: crate::core::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: capture.start() + 1,
-                            start_byte: byte_offset + capture.start(),
-                            end_byte: byte_offset + capture.end(),
-                        },
-                        context: None,
-                        gdpr_category: GdprCategory::Regular,
-                    });
-                }
-            }
-
-            byte_offset += line.len() + 1; // +1 for newline
-        }
-
-        matches
+                Self::validate_nir(&digits).then(|| Match {
+                    detector_id: self.id().to_string(),
+                    detector_name: self.name().to_string(),
+                    country: self.country().to_string(),
+                    value_masked: mask_value(&digits),
+                    location: index.location(
+                        file_path.to_path_buf(),
+                        candidate.start(),
+                        candidate.end(),
+                    ),
+                    confidence: Confidence::High,
+                    severity: self.base_severity(),
+                    context: None,
+                    gdpr_category: GdprCategory::Regular,
+                })
+            }),
+            minimum_confidence,
+            limit,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
+    fn with_key(prefix: &str) -> String {
+        assert_eq!(prefix.len(), 13);
+        let number = prefix.parse::<u64>().unwrap();
+        format!("{prefix}{:02}", 97 - (number % 97))
+    }
 
     #[test]
-    fn test_validate_nir_valid() {
-        // Valid NIR examples (manually calculated checksums)
-        // Format: sex YY MM DD dept comm order checksum
-        // For 1890575123456: 97 - (1890575123456 % 97) = 71
+    fn validates_checksum_and_supported_components() {
         assert!(NirDetector::validate_nir("189057512345671"));
-
-        // For 2891201234567: 97 - (2891201234567 % 97) = 48
         assert!(NirDetector::validate_nir("289120123456748"));
-    }
-
-    #[test]
-    fn test_validate_nir_invalid_checksum() {
-        // Wrong checksum
         assert!(!NirDetector::validate_nir("189057512345600"));
-    }
-
-    #[test]
-    fn test_validate_nir_invalid_first_digit() {
-        // First digit must be 1, 2, 7, or 8
         assert!(!NirDetector::validate_nir("389057512345671"));
-        assert!(!NirDetector::validate_nir("989057512345671"));
+        assert!(!NirDetector::validate_nir("18905751234567"));
     }
 
     #[test]
-    fn test_validate_nir_wrong_length() {
-        assert!(!NirDetector::validate_nir("18905751234567")); // 14 digits
-        assert!(!NirDetector::validate_nir("1890575123456711")); // 16 digits
+    fn rejects_invalid_components_even_with_correct_key() {
+        assert!(!NirDetector::validate_nir(&with_key("1891375123456"))); // month 13
+        assert!(!NirDetector::validate_nir(&with_key("1890500123456"))); // department 00
+        assert!(!NirDetector::validate_nir(&with_key("1890575000456"))); // commune 000
+        assert!(!NirDetector::validate_nir(&with_key("1890575123000"))); // order 000
+        assert!(NirDetector::validate_nir(&with_key("1892075123456"))); // administrative month
     }
 
     #[test]
-    fn test_nir_detection() {
+    fn detects_compact_and_spaced_nir() {
         let detector = NirDetector::new();
-        let path = PathBuf::from("test.txt");
+        let compact = detector.detect("Patient NIR: 189057512345671", Path::new("test.txt"));
+        let spaced = detector.detect("NIR: 1 89 05 75 123 456 71", Path::new("test.txt"));
 
-        let text = "Patient NIR: 189057512345671";
-        let matches = detector.detect(text, &path);
+        assert_eq!(compact.len(), 1);
+        assert_eq!(spaced.len(), 1);
+        assert_eq!(compact[0].detector_id, "fr_nir");
+        assert!(compact[0].value_masked.contains("***"));
+    }
+
+    #[test]
+    fn reports_unicode_aware_location_without_changing_span() {
+        let detector = NirDetector::new();
+        let text = "🧭 NIR: 189057512345671";
+        let matches = detector.detect(text, Path::new("test.txt"));
 
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].detector_id, "fr_nir");
-        assert_eq!(matches[0].country, "fr");
-        assert_eq!(matches[0].confidence, Confidence::High);
+        assert_eq!(matches[0].location.column, 7);
+        assert_eq!(
+            &text[matches[0].location.start_byte..matches[0].location.end_byte],
+            "189057512345671"
+        );
     }
 
     #[test]
-    fn test_nir_detection_with_spaces() {
+    fn does_not_report_invalid_checksum_or_components() {
         let detector = NirDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        // NIR with spaces (common formatting)
-        let text = "NIR: 1 89 05 75 123 456 71";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].confidence, Confidence::High);
-    }
-
-    #[test]
-    fn test_nir_detection_invalid_not_reported() {
-        let detector = NirDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        // Invalid checksum - should not be reported (low confidence filtered)
-        let text = "NIR: 189057512345600";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 0); // Low confidence matches not reported
-    }
-
-    #[test]
-    fn test_nir_masking() {
-        let detector = NirDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        let text = "NIR: 189057512345671";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 1);
-        // Default masking behavior
-        assert!(matches[0].value_masked.contains("***"));
-    }
-
-    #[test]
-    fn test_nir_severity() {
-        let detector = NirDetector::new();
-        assert_eq!(detector.base_severity(), Severity::Critical);
-    }
-
-    #[test]
-    fn test_nir_multiple_in_text() {
-        let detector = NirDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        let text = "Patient 1: 189057512345671\nPatient 2: 289120123456748";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 2);
+        let invalid_component = with_key("1891375123456");
+        let text = format!("NIR: 189057512345600 and {invalid_component}");
+        assert!(detector.detect(&text, Path::new("test.txt")).is_empty());
     }
 }

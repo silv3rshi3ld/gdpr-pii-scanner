@@ -1,6 +1,7 @@
 /// PDF text extraction using lopdf
-use super::{ExtractorError, TextExtractor};
-use lopdf::Document;
+use super::{append_limited, ExtractionLimits, ExtractorError, TextExtractor};
+use crate::safe_io::{read_opened_bounded, OpenedRegularFile};
+use lopdf::{Document, LoadOptions};
 use std::path::Path;
 
 pub struct PdfExtractor;
@@ -19,8 +20,20 @@ impl PdfExtractor {
 
 impl TextExtractor for PdfExtractor {
     fn extract(&self, path: &Path) -> Result<String, ExtractorError> {
-        // Load the PDF document
-        let document = Document::load(path)
+        self.extract_with_limits(path, ExtractionLimits::default())
+    }
+
+    fn extract_opened_with_limits(
+        &self,
+        _source_path: &Path,
+        opened: OpenedRegularFile,
+        limits: ExtractionLimits,
+    ) -> Result<String, ExtractorError> {
+        limits.validate()?;
+        let source = read_opened_bounded(opened, limits.max_input_bytes)?;
+
+        let options = LoadOptions::with_max_decompressed_size(limits.max_output_bytes);
+        let document = Document::load_mem_with_options(&source, options)
             .map_err(|e| ExtractorError::CorruptedFile(format!("Failed to load PDF: {}", e)))?;
 
         // Get the total number of pages
@@ -28,21 +41,21 @@ impl TextExtractor for PdfExtractor {
         if pages.is_empty() {
             return Ok(String::new());
         }
+        if pages.len() > limits.max_pdf_pages {
+            return Err(ExtractorError::LimitExceeded(format!(
+                "PDF has {} pages; maximum is {}",
+                pages.len(),
+                limits.max_pdf_pages
+            )));
+        }
 
         let mut text = String::new();
 
         // Extract text from each page
         for page_num in pages.keys() {
-            match Self::extract_page_text(&document, *page_num) {
-                Ok(page_text) => {
-                    text.push_str(&page_text);
-                    text.push('\n'); // Add line break between pages
-                }
-                Err(e) => {
-                    // Log warning but continue with other pages
-                    eprintln!("Warning: {}", e);
-                }
-            }
+            let page_text = Self::extract_page_text(&document, *page_num)?;
+            append_limited(&mut text, &page_text, limits.max_output_bytes)?;
+            append_limited(&mut text, "\n", limits.max_output_bytes)?;
         }
 
         Ok(text)
@@ -90,8 +103,8 @@ mod tests {
         let result = extractor.extract(&path);
         assert!(result.is_err());
         match result {
-            Err(ExtractorError::CorruptedFile(_)) => {}
-            _ => panic!("Expected CorruptedFile error"),
+            Err(ExtractorError::IoError(_)) => {}
+            _ => panic!("Expected IoError"),
         }
     }
 
@@ -140,6 +153,21 @@ mod tests {
     fn test_pdf_extractor_default() {
         let extractor = PdfExtractor;
         assert_eq!(extractor.name(), "PDF Extractor");
+    }
+
+    #[test]
+    fn test_pdf_input_limit_is_enforced_before_parsing() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(tmp.path(), b"too large").unwrap();
+        let limits = ExtractionLimits {
+            max_input_bytes: 3,
+            ..ExtractionLimits::default()
+        };
+
+        assert!(matches!(
+            PdfExtractor.extract_with_limits(tmp.path(), limits),
+            Err(ExtractorError::LimitExceeded(_))
+        ));
     }
 
     // Note: Real PDF extraction tests with actual content would require

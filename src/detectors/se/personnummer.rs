@@ -1,23 +1,16 @@
-/// Sweden personnummer detector
-///
-/// Personnummer is a 12-digit Swedish national identification number.
-///
-/// Format: YYYYMMDD-XXXX or YYMMDD-XXXX
-/// - YYYY/YY: Year of birth
-/// - MM: Month of birth
-/// - DD: Day of birth
-/// - XXX: Sequence number
-/// - X: Check digit (Luhn algorithm on last 10 digits)
-///
-/// Validation: Luhn algorithm on YYMMDDXXXX (10 digits)
-use crate::core::{Confidence, Detector, Match, Severity};
+//! Swedish personnummer detector.
+
+use crate::core::{
+    Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity, TextIndex,
+};
 use crate::utils::mask_value;
+use chrono::{Datelike, NaiveDate, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::path::Path;
 
 static PERSONNUMMER_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b\d{8}-?\d{4}\b|\b\d{6}-?\d{4}\b").expect("Invalid personnummer regex pattern")
+    Regex::new(r"\b(?:\d{8}-?\d{4}|\d{6}(?:[-+]?\d{4}))\b").expect("valid personnummer regex")
 });
 
 pub struct PersonnummerDetector;
@@ -27,99 +20,79 @@ impl PersonnummerDetector {
         Self
     }
 
-    /// Extract 10-digit number for Luhn validation
+    fn normalized(personnummer: &str) -> Option<String> {
+        let value: String = personnummer
+            .chars()
+            .filter(|character| !matches!(character, '-' | '+'))
+            .collect();
+        ((value.len() == 10 || value.len() == 12)
+            && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then_some(value)
+    }
+
     fn extract_validation_digits(personnummer: &str) -> Option<String> {
-        let normalized = personnummer.replace('-', "");
-
-        if normalized.len() == 12 {
-            // YYYYMMDDXXXX -> use last 10 digits (YYMMDDXXXX)
-            Some(normalized[2..].to_string())
-        } else if normalized.len() == 10 {
-            // YYMMDDXXXX -> use as is
-            Some(normalized)
-        } else {
-            None
+        let normalized = Self::normalized(personnummer)?;
+        match normalized.len() {
+            12 => Some(normalized[2..].to_string()),
+            10 => Some(normalized),
+            _ => None,
         }
     }
 
-    /// Validate personnummer using Luhn algorithm
-    fn validate_personnummer(personnummer: &str) -> bool {
-        if let Some(digits_str) = Self::extract_validation_digits(personnummer) {
-            // Inline Luhn validation for 10-digit personnummer
-            // Swedish personnummer uses Luhn with doubling at positions 0, 2, 4, ... from right
-            let digits: Vec<u32> = digits_str.chars().filter_map(|c| c.to_digit(10)).collect();
+    fn valid_luhn(personnummer: &str) -> bool {
+        let Some(digits) = Self::extract_validation_digits(personnummer) else {
+            return false;
+        };
+        digits
+            .bytes()
+            .enumerate()
+            .map(|(index, digit)| {
+                let digit = u32::from(digit - b'0');
+                if index % 2 == 0 {
+                    let doubled = digit * 2;
+                    doubled / 10 + doubled % 10
+                } else {
+                    digit
+                }
+            })
+            .sum::<u32>()
+            .is_multiple_of(10)
+    }
 
-            if digits.len() != 10 {
-                return false;
+    fn resolved_date(personnummer: &str) -> Option<NaiveDate> {
+        let normalized = Self::normalized(personnummer)?;
+        let (year, month_offset) = if normalized.len() == 12 {
+            (normalized[0..4].parse::<i32>().ok()?, 4)
+        } else {
+            let short_year = normalized[0..2].parse::<i32>().ok()?;
+            let today = Utc::now().date_naive();
+            let mut year = today.year() - today.year().rem_euclid(100) + short_year;
+            let month = normalized[2..4].parse::<u32>().ok()?;
+            let day = normalized[4..6].parse::<u32>().ok()?;
+            let candidate = NaiveDate::from_ymd_opt(year, month, day)?;
+            if candidate > today {
+                year -= 100;
             }
-
-            // Luhn algorithm for Swedish personnummer: double every other digit starting from RIGHT
-            let sum: u32 = digits
-                .iter()
-                .rev()
-                .enumerate()
-                .map(|(index, &digit)| {
-                    if index % 2 == 0 {
-                        // Double positions 0, 2, 4, ... from right (Swedish variant)
-                        let doubled = digit * 2;
-                        if doubled > 9 {
-                            doubled - 9
-                        } else {
-                            doubled
-                        }
-                    } else {
-                        digit
-                    }
-                })
-                .sum();
-
-            sum.is_multiple_of(10)
-        } else {
-            false
-        }
+            if personnummer.contains('+') {
+                year -= 100;
+            }
+            (year, 2)
+        };
+        let month = normalized[month_offset..month_offset + 2]
+            .parse::<u32>()
+            .ok()?;
+        let day = normalized[month_offset + 2..month_offset + 4]
+            .parse::<u32>()
+            .ok()?;
+        NaiveDate::from_ymd_opt(year, month, day)
     }
 
-    /// Validate date components
     fn validate_date(personnummer: &str) -> bool {
-        let normalized = personnummer.replace('-', "");
+        Self::resolved_date(personnummer).is_some()
+    }
 
-        let (_year_str, month_day) = if normalized.len() == 12 {
-            (&normalized[0..4], &normalized[4..8])
-        } else if normalized.len() == 10 {
-            (&normalized[0..2], &normalized[2..6])
-        } else {
-            return false;
-        };
-
-        let month: u32 = match month_day[0..2].parse() {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let day: u32 = match month_day[2..4].parse() {
-            Ok(d) => d,
-            Err(_) => return false,
-        };
-
-        // Month must be 1-12
-        if !(1..=12).contains(&month) {
-            return false;
-        }
-
-        // Day must be 1-31
-        if !(1..=31).contains(&day) {
-            return false;
-        }
-
-        // Basic month-day validation
-        if month == 2 && day > 29 {
-            return false;
-        }
-
-        if [4, 6, 9, 11].contains(&month) && day > 30 {
-            return false;
-        }
-
-        true
+    fn validate_personnummer(personnummer: &str) -> bool {
+        Self::validate_date(personnummer) && Self::valid_luhn(personnummer)
     }
 }
 
@@ -141,48 +114,47 @@ impl Detector for PersonnummerDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        for (line_num, line) in text.lines().enumerate() {
-            for cap in PERSONNUMMER_PATTERN.captures_iter(line) {
-                if let Some(mat) = cap.get(0) {
-                    let value = mat.as_str();
-
-                    // First validate date format
-                    if !Self::validate_date(value) {
-                        continue;
-                    }
-
-                    // Then validate Luhn checksum
-                    if !Self::validate_personnummer(value) {
-                        continue;
-                    }
-
-                    let digits = value.replace('-', "");
-                    matches.push(Match {
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let index = TextIndex::new(text);
+        DetectionOutcome::from_iter(
+            PERSONNUMMER_PATTERN
+                .find_iter(text)
+                .filter(|candidate| Self::validate_personnummer(candidate.as_str()))
+                .map(|candidate| {
+                    let digits: String = candidate
+                        .as_str()
+                        .chars()
+                        .filter(char::is_ascii_digit)
+                        .collect();
+                    Match {
                         detector_id: self.id().to_string(),
                         detector_name: self.name().to_string(),
                         country: self.country().to_string(),
                         value_masked: mask_value(&digits),
-                        location: crate::core::types::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: mat.start(),
-                            start_byte: byte_offset + mat.start(),
-                            end_byte: byte_offset + mat.end(),
-                        },
+                        location: index.location(
+                            file_path.to_path_buf(),
+                            candidate.start(),
+                            candidate.end(),
+                        ),
                         confidence: Confidence::High,
                         severity: self.base_severity(),
                         context: None,
-                        gdpr_category: crate::core::GdprCategory::Regular,
-                    });
-                }
-            }
-            byte_offset += line.len() + 1;
-        }
-
-        matches
+                        gdpr_category: GdprCategory::Regular,
+                    }
+                }),
+            minimum_confidence,
+            limit,
+        )
     }
 }
 
@@ -195,48 +167,50 @@ impl Default for PersonnummerDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
-    fn test_valid_personnummer() {
-        // Valid Swedish personnummer (12-digit format)
-        assert!(PersonnummerDetector::validate_personnummer("19900101-1003"));
-        // 10-digit format
-        assert!(PersonnummerDetector::validate_personnummer("900101-1003"));
-    }
-
-    #[test]
-    fn test_invalid_personnummer_checksum() {
+    fn validates_standard_luhn_and_full_date() {
+        assert!(PersonnummerDetector::validate_personnummer("19900101-0017"));
+        assert!(PersonnummerDetector::validate_personnummer("900101-0017"));
         assert!(!PersonnummerDetector::validate_personnummer(
             "19900101-0018"
         ));
     }
 
     #[test]
-    fn test_invalid_date() {
-        assert!(!PersonnummerDetector::validate_date("19901301-0017")); // Month 13
-        assert!(!PersonnummerDetector::validate_date("19900132-0017")); // Day 32
+    fn rejects_impossible_dates_and_honors_explicit_century() {
+        assert!(!PersonnummerDetector::validate_date("19901301-0017"));
+        assert!(!PersonnummerDetector::validate_date("19900431-0017"));
+        assert!(!PersonnummerDetector::validate_date("19000229-0017"));
+        assert!(PersonnummerDetector::validate_date("20000229-0017"));
     }
 
     #[test]
-    fn test_detector_finds_valid_personnummer() {
-        let detector = PersonnummerDetector::new();
-        let text = "Personnummer: 19900101-1003";
-        let path = PathBuf::from("test.txt");
+    fn supports_centenarian_separator() {
+        assert!(PersonnummerDetector::validate_date("900101+0017"));
+        assert!(PersonnummerDetector::extract_validation_digits("900101+0017").is_some());
+    }
 
-        let matches = detector.detect(text, &path);
+    #[test]
+    fn finds_valid_number_with_unicode_prefix_and_exact_span() {
+        let detector = PersonnummerDetector::new();
+        let text = "ägare 🧭 19900101-0017";
+        let matches = detector.detect(text, Path::new("test.txt"));
+
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].confidence, Confidence::High);
+        assert_eq!(matches[0].location.column, 8);
+        assert_eq!(
+            &text[matches[0].location.start_byte..matches[0].location.end_byte],
+            "19900101-0017"
+        );
         assert_eq!(matches[0].country, "se");
     }
 
     #[test]
-    fn test_detector_short_format() {
+    fn rejects_checksum_valid_shape_with_invalid_date() {
         let detector = PersonnummerDetector::new();
-        let text = "Personnummer: 900101-1003";
-        let path = PathBuf::from("test.txt");
-
-        let matches = detector.detect(text, &path);
-        assert_eq!(matches.len(), 1);
+        assert!(detector
+            .detect("Personnummer: 19900431-0017", Path::new("test.txt"))
+            .is_empty());
     }
 }

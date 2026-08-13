@@ -2,13 +2,12 @@
 
 /// Mask a PII value for display
 ///
-/// Shows first 3 and last 2 characters, masks the middle
+/// Shows up to the first 3 and last 2 characters, and masks the middle.
 /// Examples:
 /// - "123456789" → "123****89"
-/// - "NL91ABNA0417164300" → "NL9************00"
-/// - "user@example.com" → "use*********com"
+/// - "ABCDEFGHIJ" → "ABC*****IJ"
 pub fn mask_value(value: &str) -> String {
-    let len = value.len();
+    let len = value.chars().count();
 
     if len <= 5 {
         // Too short to mask meaningfully
@@ -19,12 +18,17 @@ pub fn mask_value(value: &str) -> String {
     let show_end = 2.min(len / 4);
     let mask_len = len - show_start - show_end;
 
-    format!(
-        "{}{}{}",
-        &value[..show_start],
-        "*".repeat(mask_len),
-        &value[len - show_end..]
-    )
+    let start: String = value.chars().take(show_start).collect();
+    let end: String = value
+        .chars()
+        .rev()
+        .take(show_end)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    format!("{start}{}{end}", "*".repeat(mask_len))
 }
 
 /// Mask credit card number (show last 4 digits only)
@@ -43,45 +47,57 @@ pub fn mask_credit_card(value: &str) -> String {
     format!("{}{}", "*".repeat(len - 4), &digits[len - 4..])
 }
 
-/// Mask email address (show first char + domain)
+/// Mask email address (show at most the first local-part character + domain)
 ///
 /// Examples:
-/// - "john.doe@example.com" → "j********@example.com"
+/// - "john.doe@example.com" → "j*******@example.com"
 /// - "admin@company.co.uk" → "a****@company.co.uk"
 pub fn mask_email(email: &str) -> String {
     if let Some(at_pos) = email.find('@') {
         let local = &email[..at_pos];
         let domain = &email[at_pos..];
+        let local_len = local.chars().count();
 
-        if local.is_empty() {
-            return email.to_string();
+        if local_len == 0 {
+            return "*".repeat(email.chars().count());
         }
 
-        let show_chars = 1.min(local.len());
-        let mask_len = local.len() - show_chars;
+        // Very short local parts contain no safe character to reveal. Masking
+        // two scalars also covers a common decomposed one-grapheme spelling.
+        if local_len <= 2 {
+            return format!("{}{domain}", "*".repeat(local_len));
+        }
 
-        format!("{}{}{}", &local[..show_chars], "*".repeat(mask_len), domain)
+        let first = local.chars().next().expect("non-empty local part");
+        format!("{first}{}{domain}", "*".repeat(local_len - 1))
     } else {
         // Invalid email, mask everything
-        "*".repeat(email.len())
+        "*".repeat(email.chars().count())
     }
 }
 
 /// Mask IBAN (show country code + last 4)
 ///
 /// Examples:
-/// - "NL91ABNA0417164300" → "NL**************4300"
-/// - "DE89370400440532013000" → "DE******************3000"
+/// - "NL91ABNA0417164300" → "NL************4300"
+/// - "DE89370400440532013000" → "DE****************3000"
 pub fn mask_iban(iban: &str) -> String {
     let clean: String = iban.chars().filter(|c| !c.is_whitespace()).collect();
-    let len = clean.len();
+    let len = clean.chars().count();
 
     if len < 6 {
         return "*".repeat(len);
     }
 
-    let country = &clean[..2];
-    let last_four = &clean[len - 4..];
+    let country: String = clean.chars().take(2).collect();
+    let last_four: String = clean
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     let mask_len = len - 6;
 
     format!("{}{}{}", country, "*".repeat(mask_len), last_four)
@@ -90,8 +106,8 @@ pub fn mask_iban(iban: &str) -> String {
 /// Mask phone number (show country code + last 3)
 ///
 /// Examples:
-/// - "+31612345678" → "+31********678"
-/// - "0612345678" → "06*******678"
+/// - "+31612345678" → "+31******678"
+/// - "0612345678" → "06*****678"
 pub fn mask_phone(phone: &str) -> String {
     let digits: String = phone
         .chars()
@@ -119,10 +135,9 @@ pub fn mask_phone(phone: &str) -> String {
 ///
 /// Examples:
 /// - "AKIAIOSFODNN7EXAMPLE" → "AKIA****************"
-/// - "sk_live_abcdefghijklmnop" → "sk_live_***************"
-/// - "ghp_1234567890abcdefghijklmnopqrstu123456" → "ghp_************************************"
+/// - "sk_live_abcdefghijklmnop" → "sk_live_****************"
 pub fn mask_api_key(key: &str) -> String {
-    let len = key.len();
+    let len = key.chars().count();
 
     if len <= 8 {
         return "*".repeat(len);
@@ -148,7 +163,8 @@ pub fn mask_api_key(key: &str) -> String {
     };
 
     let mask_len = len - show_chars;
-    format!("{}{}", &key[..show_chars], "*".repeat(mask_len))
+    let visible: String = key.chars().take(show_chars).collect();
+    format!("{}{}", visible, "*".repeat(mask_len))
 }
 
 #[cfg(test)]
@@ -160,6 +176,8 @@ mod tests {
         assert_eq!(mask_value("123456789"), "123****89");
         assert_eq!(mask_value("ABC"), "***");
         assert_eq!(mask_value("ABCDEFGHIJ"), "ABC*****IJ");
+        assert_eq!(mask_value("éèêëçà"), "éè***à");
+        assert_eq!(mask_value("😀12345"), "😀1***5");
     }
 
     #[test]
@@ -172,8 +190,14 @@ mod tests {
     #[test]
     fn test_mask_email() {
         assert_eq!(mask_email("john.doe@example.com"), "j*******@example.com");
-        assert_eq!(mask_email("a@b.com"), "a@b.com");
+        assert_eq!(mask_email("a@b.com"), "*@b.com");
+        assert_eq!(mask_email("ab@b.com"), "**@b.com");
         assert_eq!(mask_email("admin@company.co.uk"), "a****@company.co.uk");
+        assert_eq!(mask_email("éclair@example.com"), "é*****@example.com");
+        assert_eq!(mask_email("😀@example.com"), "*@example.com");
+        assert_eq!(mask_email("e\u{301}@example.com"), "**@example.com");
+        assert_eq!(mask_email("@example.com"), "************");
+        assert_eq!(mask_email("😀"), "*");
     }
 
     #[test]
@@ -184,6 +208,7 @@ mod tests {
             "DE****************3000"
         );
         assert_eq!(mask_iban("NL91 ABNA 0417 1643 00"), "NL************4300");
+        assert_eq!(mask_iban("ÉU123456"), "ÉU**3456");
     }
 
     #[test]
@@ -212,5 +237,6 @@ mod tests {
             mask_api_key("xoxb-1234567890-abcdefghijk"),
             "xox************************"
         );
+        assert_eq!(mask_api_key("éèêëçà1234"), "éè********");
     }
 }

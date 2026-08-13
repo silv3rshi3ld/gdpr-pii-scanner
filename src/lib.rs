@@ -1,7 +1,9 @@
-/// PII-Radar: High-performance PII scanner for local files
-///
-/// Detects Personally Identifiable Information (PII) across European countries
-/// with support for GDPR special category data detection via context analysis.
+//! Library APIs for finding candidate personal identifiers and secrets in
+//! files, HTTP responses, and optional database connectors.
+//!
+//! Findings are evidence for review, not proof of identity, legal status, or
+//! complete coverage. Callers should inspect [`ScanResults::status`] and source
+//! errors before treating an empty result as clean.
 pub mod cli;
 pub mod config;
 pub mod core;
@@ -9,22 +11,59 @@ pub mod crawler;
 pub mod detectors;
 pub mod extractors;
 pub mod reporter;
+#[doc(hidden)]
+pub mod safe_io;
 pub mod scanner;
 pub mod utils;
 
-#[cfg(feature = "database")]
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
 pub mod database;
 
 // Re-export commonly used types
 pub use config::Config;
 pub use core::{
-    default_plugins_dir, load_plugins, Confidence, ContextAnalyzer, Detector, DetectorRegistry,
-    FileResult, GdprCategory, Match, PluginDetector, ScanResults, Severity, SpecialCategory,
+    Confidence, ContextAnalyzer, DetectionOutcome, Detector, DetectorRegistry, FileResult,
+    GdprCategory, Match, ScanResults, ScanStatus, Severity, SpecialCategory, TargetKind, TextIndex,
+};
+
+pub use detectors::plugin::{
+    LengthUnit as PluginLengthUnit, MatchScope as PluginMatchScope,
+    PatternConfig as PluginPatternConfig, PluginConfig, PluginDetector,
+    ValidationConfig as PluginValidationConfig, PLUGIN_SCHEMA_VERSION,
+};
+pub use detectors::plugin_loader::{
+    discover_plugin_files, load_plugin_from_file, load_plugins_from_directory,
+    load_plugins_with_diagnostics, PluginLoadReport,
+};
+
+#[allow(deprecated)]
+#[deprecated(
+    since = "0.6.0",
+    note = "use configured plugin directories; the legacy helper will be removed in 0.7"
+)]
+pub use core::plugin::default_plugins_dir;
+#[allow(deprecated)]
+#[deprecated(
+    since = "0.6.0",
+    note = "use `load_plugins_from_directory`; the legacy boxed loader will be removed in 0.7"
+)]
+pub use core::plugin::load_plugins;
+#[allow(deprecated)]
+#[deprecated(
+    since = "0.6.0",
+    note = "use the canonical plugin types exported at the crate root"
+)]
+pub use core::plugin::{
+    ChecksumType as LegacyPluginChecksum, ConfidenceLevel as LegacyPluginConfidence,
+    DetectorConfig as LegacyPluginDetectorConfig, PluginConfig as LegacyPluginConfig,
+    PluginDetector as LegacyPluginDetector, SeverityLevel as LegacyPluginSeverity,
+    ValidationConfig as LegacyPluginValidationConfig,
 };
 
 pub use crawler::{FileFilter, Walker};
 pub use extractors::{
-    DocxExtractor, ExtractorError, ExtractorRegistry, PdfExtractor, TextExtractor, XlsxExtractor,
+    DocxExtractor, ExtractionLimits, ExtractorError, ExtractorRegistry, PdfExtractor,
+    TextExtractor, XlsxExtractor,
 };
 pub use reporter::{CsvReporter, HtmlReporter, JsonReporter, TerminalReporter};
 pub use scanner::{scan_api_endpoint, scan_api_endpoints, ApiScanConfig, HttpMethod, ScanEngine};
@@ -163,11 +202,6 @@ pub fn registry_for_countries(countries: Vec<String>) -> DetectorRegistry {
     // Poland
     if should_include("pl") {
         registry.register(Box::new(detectors::pl::PeselDetector::new()));
-    }
-
-    // Portugal
-    if should_include("pt") {
-        registry.register(Box::new(detectors::pt::NifDetector::new()));
     }
 
     // Spain

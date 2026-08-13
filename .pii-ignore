@@ -1,66 +1,58 @@
-# Default ignore patterns voor PII-Radar
-# Vergelijkbaar met .gitignore syntax
+# Gitignore-style defaults for PII Radar.
+# Review these exclusions for each data set; ignored content is not scanned.
 
 # Version control
 .git/
-.svn/
 .hg/
+.svn/
 
-# Dependencies
+# Dependencies and virtual environments
 node_modules/
 vendor/
-target/
 venv/
+.venv/
 __pycache__/
 
-# Build artifacts
+# Build output
+target/
+dist/
+build/
 *.o
 *.so
 *.dylib
 *.dll
 *.exe
-dist/
-build/
+*.class
+*.pyc
 
-# IDE
+# Editors and temporary files
 .idea/
 .vscode/
 *.swp
 *.swo
+*.tmp
+*.temp
+*.bak
+*~
 
-# Binaries (standaard skip, tenzij --scan-binaries flag)
-*.bin
-*.dat
-*.class
-*.pyc
-
-# Media (meestal geen PII)
+# Media and archives are normally unsuitable for direct text scanning.
 *.jpg
 *.jpeg
 *.png
 *.gif
-*.mp4
+*.bmp
+*.svg
 *.mp3
-*.wav
+*.mp4
 *.avi
-
-# Compressed archives (enable met --extract-archives)
+*.mov
+*.wav
 *.zip
 *.tar
 *.gz
 *.7z
 *.rar
 
-# Large files (>100MB default limit)
-# Configureerbaar met --max-file-size
-
-# System files
+# Operating-system metadata
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Temporary files
-*.tmp
-*.temp
-*.swp
-*~

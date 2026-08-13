@@ -1,44 +1,19 @@
-# Custom Employee ID Detector
-#
-# This example shows how to create a custom PII detector plugin.
-# Save this file as filename.detector.toml in your plugin directory.
-
-id = "custom_employee_id"
-name = "Employee ID"
+schema_version = 1
+id = "example_employee_id"
+name = "Example employee identifier"
 country = "universal"
 category = "custom"
-description = "Detects company-specific employee identification numbers"
+description = "Matches a synthetic organisation-specific employee format."
 severity = "medium"
+examples = ["EMP-000001"]
+context_keywords = ["employee", "staff", "payroll"]
 
-# Multiple patterns can be defined with different confidence levels
 [[patterns]]
-pattern = "EMP-\\d{6}"
+pattern = "\\bEMP-\\d{6}\\b"
 confidence = "high"
-description = "Standard employee ID format (EMP-123456)"
+description = "EMP prefix followed by six digits."
 
-[[patterns]]
-pattern = "EMPLOYEE\\s+#?\\d{4,6}"
-confidence = "medium"
-description = "Employee number with label"
-
-# Optional validation rules
 [validation]
-min_length = 4
-max_length = 20
-required_prefix = "EMP"  # Optional: enforce specific prefix
-
-# Example values for testing
-examples = [
-    "EMP-123456",
-    "EMP-987654",
-    "EMPLOYEE #4567"
-]
-
-# Context keywords that boost confidence when found nearby
-context_keywords = [
-    "employee",
-    "staff",
-    "personnel",
-    "HR",
-    "payroll"
-]
+min_length = 10
+max_length = 10
+required_prefix = "EMP-"

@@ -1,6 +1,9 @@
 /// API key detector (entropy-based)
 /// Detects API keys, tokens, and secrets using pattern matching and entropy analysis
-use crate::core::{Confidence, Detector, GdprCategory, Location, Match, Severity};
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{
+    Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity, TextIndex,
+};
 use crate::utils::entropy::{is_high_entropy, randomness_score, shannon_entropy};
 use crate::utils::masking::mask_api_key;
 use once_cell::sync::Lazy;
@@ -131,9 +134,16 @@ impl ApiKeyDetector {
 
     /// Check if context suggests this is a real secret
     fn analyze_context(text: &str, match_start: usize) -> Confidence {
-        // Get surrounding text (100 chars before)
-        let context_start = match_start.saturating_sub(100);
-        let context = &text[context_start..match_start].to_lowercase();
+        // Get up to 100 Unicode scalar values before the match. Regex offsets
+        // are bytes, so subtracting 100 directly can land inside UTF-8.
+        let match_start = match_start.min(text.len());
+        let match_start = floor_char_boundary(text, match_start);
+        let context_start = text[..match_start]
+            .char_indices()
+            .rev()
+            .nth(99)
+            .map_or(0, |(index, _)| index);
+        let context = text[context_start..match_start].to_lowercase();
 
         // Check for false positive indicators
         for keyword in FALSE_POSITIVE_KEYWORDS {
@@ -153,11 +163,19 @@ impl ApiKeyDetector {
     }
 
     /// Detect high-entropy strings that might be secrets
-    fn detect_high_entropy(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
+    fn detect_high_entropy_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
         let mut byte_offset = 0;
+        let text_index = TextIndex::new(text);
 
-        for (line_num, line) in text.lines().enumerate() {
+        'scan: for raw_line in text.split_inclusive('\n') {
+            let line = line_without_terminator(raw_line);
             for cap in HIGH_ENTROPY_PATTERN.captures_iter(line) {
                 let matched = cap.get(0).unwrap();
                 let matched_text = matched.as_str();
@@ -177,32 +195,33 @@ impl ApiKeyDetector {
                     let confidence = Self::analyze_context(text, byte_offset + matched.start());
 
                     // Only report medium/high confidence to reduce false positives
-                    if matches!(confidence, Confidence::Medium | Confidence::High) {
-                        matches.push(Match {
-                            detector_id: self.id().to_string(),
-                            detector_name: self.name().to_string(),
-                            country: self.country().to_string(),
-                            value_masked: mask_api_key(matched_text),
-                            location: Location {
-                                file_path: file_path.to_path_buf(),
-                                line: line_num + 1,
-                                column: matched.start(),
-                                start_byte: byte_offset + matched.start(),
-                                end_byte: byte_offset + matched.end(),
-                            },
-                            confidence,
-                            severity: self.base_severity(),
-                            context: None,
-                            gdpr_category: GdprCategory::Regular,
-                        });
+                    if !matches!(confidence, Confidence::Medium | Confidence::High) {
+                        continue;
+                    }
+                    if !matches.push(Match {
+                        detector_id: self.id().to_string(),
+                        detector_name: self.name().to_string(),
+                        country: self.country().to_string(),
+                        value_masked: mask_api_key(matched_text),
+                        location: text_index.location(
+                            file_path.to_path_buf(),
+                            byte_offset + matched.start(),
+                            byte_offset + matched.end(),
+                        ),
+                        confidence,
+                        severity: self.base_severity(),
+                        context: None,
+                        gdpr_category: GdprCategory::Regular,
+                    }) {
+                        break 'scan;
                     }
                 }
             }
 
-            byte_offset += line.len() + 1;
+            byte_offset += raw_line.len();
         }
 
-        matches
+        matches.finish()
     }
 }
 
@@ -230,11 +249,24 @@ impl Detector for ApiKeyDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
+
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
         let mut byte_offset = 0;
+        let text_index = TextIndex::new(text);
 
         // First, check known API key patterns (high confidence)
-        for (line_num, line) in text.lines().enumerate() {
+        'known: for raw_line in text.split_inclusive('\n') {
+            let line = line_without_terminator(raw_line);
             for (pattern, key_type) in KNOWN_PATTERNS.iter() {
                 for cap in pattern.captures_iter(line) {
                     let matched = cap.get(0).unwrap();
@@ -242,34 +274,58 @@ impl Detector for ApiKeyDetector {
 
                     let confidence = Self::analyze_context(text, byte_offset + matched.start());
 
-                    matches.push(Match {
+                    if !matches.push(Match {
                         detector_id: self.id().to_string(),
                         detector_name: format!("{} ({})", self.name(), key_type),
                         country: self.country().to_string(),
                         value_masked: mask_api_key(matched_text),
-                        location: Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: matched.start(),
-                            start_byte: byte_offset + matched.start(),
-                            end_byte: byte_offset + matched.end(),
-                        },
+                        location: text_index.location(
+                            file_path.to_path_buf(),
+                            byte_offset + matched.start(),
+                            byte_offset + matched.end(),
+                        ),
                         confidence,
                         severity: self.base_severity(),
                         context: None,
                         gdpr_category: GdprCategory::Regular,
-                    });
+                    }) {
+                        break 'known;
+                    }
                 }
             }
 
-            byte_offset += line.len() + 1;
+            byte_offset += raw_line.len();
         }
 
-        // Then, check for high-entropy strings (unknown secrets)
-        matches.extend(self.detect_high_entropy(text, file_path));
+        let mut outcome = matches.finish();
+        if outcome.truncated {
+            return outcome;
+        }
 
-        matches
+        // Then, check for high-entropy strings (unknown secrets).
+        let entropy = self.detect_high_entropy_limited(
+            text,
+            file_path,
+            minimum_confidence,
+            limit.saturating_sub(outcome.matches.len()),
+        );
+        outcome.matches.extend(entropy.matches);
+        outcome.truncated = entropy.truncated;
+        outcome.omitted_matches = entropy.omitted_matches;
+        outcome
     }
+}
+
+fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn line_without_terminator(line: &str) -> &str {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    line.strip_suffix('\r').unwrap_or(line)
 }
 
 #[cfg(test)]
@@ -383,5 +439,32 @@ mod tests {
 
         assert!(matches1.iter().any(|m| m.confidence == Confidence::High));
         assert!(matches2.is_empty() || matches2.iter().all(|m| m.confidence == Confidence::Low));
+    }
+
+    #[test]
+    fn unicode_context_does_not_panic() {
+        let detector = ApiKeyDetector::new();
+        let text = format!(
+            "{} token: ghp_1234567890abcdefghijklmnopqrstu123456",
+            "é".repeat(80)
+        );
+        let matches = detector.detect(&text, Path::new("unicode.env"));
+        assert!(matches.iter().any(|m| m.confidence == Confidence::High));
+    }
+
+    #[test]
+    fn crlf_locations_use_original_byte_offsets() {
+        let detector = ApiKeyDetector::new();
+        let text = "heading\r\ntoken: ghp_1234567890abcdefghijklmnopqrstu123456";
+        let expected = text.find("ghp_").unwrap();
+        let matches = detector.detect(text, Path::new("windows.env"));
+        let github = matches
+            .iter()
+            .find(|m| m.detector_name.contains("GitHub"))
+            .unwrap();
+
+        assert_eq!(github.location.line, 2);
+        assert_eq!(github.location.column, 7);
+        assert_eq!(github.location.start_byte, expected);
     }
 }

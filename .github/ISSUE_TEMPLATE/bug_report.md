@@ -1,37 +1,51 @@
 ---
 name: Bug report
-about: Report a defect in pii-radar
+about: Report reproducible incorrect behaviour
 title: "[bug] "
 labels: bug
-assignees: ''
+assignees: ""
 ---
 
+## Before reporting
+
+Do not report suspected vulnerabilities publicly; use the private process in `SECURITY.md`. Remove personal data, credentials, connection strings, private URLs, and sensitive paths from this issue. Reproduce with synthetic input.
+
 ## Description
-A clear and concise description of the bug.
+
+<!-- What happened, and which result was incorrect? -->
 
 ## Reproduction
-Steps to reproduce:
-1. ...
-2. ...
-3. ...
 
-Minimal command or input that triggers the issue (please redact any real PII):
+<!-- Provide the smallest synthetic fixture and exact command. -->
 
-```sh
-pii-radar scan ...
+```console
+pii-radar --no-config scan ./synthetic.txt
 ```
 
-## Expected behavior
-What you expected to happen.
+## Expected behaviour
 
-## Actual behavior
-What actually happened. Include error messages or stack traces.
+<!-- Include the expected output and exit code. -->
+
+## Actual behaviour
+
+<!-- Include redacted output, standard error, and exit code. -->
 
 ## Environment
-- `pii-radar --version`:
-- OS:
-- Rust toolchain (`rustc --version`):
-- Install method (cargo install / source build / binary):
+
+- PII Radar version:
+- Artifact: core / full / source
+- Operating system and architecture:
+- Installation method:
+- Rust version, for source builds:
+- Configuration source: `--no-config` / explicit path / discovered path
+
+## Scope
+
+- Command: scan / api / scan-db / detectors / library
+- Output format:
+- Optional features:
+- Does the problem reproduce with `--no-config`?
 
 ## Additional context
-Logs (`RUST_LOG=debug`), config files, or screenshots.
+
+<!-- Link public specifications where useful. Do not attach production reports or configuration containing secrets. -->

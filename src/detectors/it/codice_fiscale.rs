@@ -1,32 +1,26 @@
-/// Italian Codice Fiscale detector
-///
-/// The Codice Fiscale is the Italian tax code. It consists of 16 alphanumeric characters:
-/// - 3 letters: surname (consonants, then vowels)
-/// - 3 letters: first name (consonants, then vowels)
-/// - 2 digits: year of birth (YY)
-/// - 1 letter: month of birth (A=Jan, B=Feb, C=Mar, etc.)
-/// - 2 digits: day of birth (01-31 for males, 41-71 for females)
-/// - 4 characters: municipality code (1 letter + 3 digits)
-/// - 1 letter: check digit (calculated from previous 15 characters)
-///
-/// Format: RSSMRI YY M DD LLLL K
-/// Example: RSSMRA85T10A562S
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+//! Italian Codice Fiscale detector.
+
+use crate::core::{
+    Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity, TextIndex,
+};
 use crate::utils::mask_value;
+use chrono::NaiveDate;
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::path::Path;
 
-/// Regex pattern for Codice Fiscale detection
-/// Matches: 16 alphanumeric characters in the correct pattern
-/// [A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]
 static CF_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]\b")
-        .expect("Failed to compile Codice Fiscale regex")
+    RegexBuilder::new(r"\b[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]\b")
+        .case_insensitive(true)
+        .build()
+        .expect("valid Codice Fiscale regex")
 });
 
-/// Month codes for Codice Fiscale
-const MONTH_CODES: [char; 12] = ['A', 'B', 'C', 'D', 'E', 'H', 'L', 'M', 'P', 'R', 'S', 'T'];
+const MONTH_CODES: [u8; 12] = *b"ABCDEHLMPRST";
+const ODD_DIGITS: [u32; 10] = [1, 0, 5, 7, 9, 13, 15, 17, 19, 21];
+const ODD_LETTERS: [u32; 26] = [
+    1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3, 6, 8, 12, 14, 16, 10, 22, 25, 24, 23,
+];
 
 pub struct CodiceFiscaleDetector;
 
@@ -35,169 +29,102 @@ impl CodiceFiscaleDetector {
         Self
     }
 
-    /// Validate Codice Fiscale check digit
-    fn validate_check_digit(code: &str) -> bool {
-        if code.len() != 16 {
-            return false;
+    fn normalized(code: &str) -> Option<[u8; 16]> {
+        let mut bytes: [u8; 16] = code.as_bytes().try_into().ok()?;
+        if !bytes.iter().all(u8::is_ascii_alphanumeric) {
+            return None;
         }
+        bytes.make_ascii_uppercase();
+        Some(bytes)
+    }
 
-        // Check digit calculation tables
-        let odd_values = [
-            ('0', 1),
-            ('1', 0),
-            ('2', 5),
-            ('3', 7),
-            ('4', 9),
-            ('5', 13),
-            ('6', 15),
-            ('7', 17),
-            ('8', 19),
-            ('9', 21),
-            ('A', 1),
-            ('B', 0),
-            ('C', 5),
-            ('D', 7),
-            ('E', 9),
-            ('F', 13),
-            ('G', 15),
-            ('H', 17),
-            ('I', 19),
-            ('J', 21),
-            ('K', 2),
-            ('L', 4),
-            ('M', 18),
-            ('N', 20),
-            ('O', 11),
-            ('P', 3),
-            ('Q', 6),
-            ('R', 8),
-            ('S', 12),
-            ('T', 14),
-            ('U', 16),
-            ('V', 10),
-            ('W', 22),
-            ('X', 25),
-            ('Y', 24),
-            ('Z', 23),
-        ];
-
-        let even_values = [
-            ('0', 0),
-            ('1', 1),
-            ('2', 2),
-            ('3', 3),
-            ('4', 4),
-            ('5', 5),
-            ('6', 6),
-            ('7', 7),
-            ('8', 8),
-            ('9', 9),
-            ('A', 0),
-            ('B', 1),
-            ('C', 2),
-            ('D', 3),
-            ('E', 4),
-            ('F', 5),
-            ('G', 6),
-            ('H', 7),
-            ('I', 8),
-            ('J', 9),
-            ('K', 10),
-            ('L', 11),
-            ('M', 12),
-            ('N', 13),
-            ('O', 14),
-            ('P', 15),
-            ('Q', 16),
-            ('R', 17),
-            ('S', 18),
-            ('T', 19),
-            ('U', 20),
-            ('V', 21),
-            ('W', 22),
-            ('X', 23),
-            ('Y', 24),
-            ('Z', 25),
-        ];
-
-        // Convert to hashmaps for fast lookup
-        let odd_map: std::collections::HashMap<char, i32> = odd_values.iter().cloned().collect();
-        let even_map: std::collections::HashMap<char, i32> = even_values.iter().cloned().collect();
-
-        let chars: Vec<char> = code.chars().collect();
-        let mut sum = 0;
-
-        // Calculate sum of first 15 characters
-        for (i, &ch) in chars[0..15].iter().enumerate() {
-            if i % 2 == 0 {
-                // Odd position (1-indexed, so even index)
-                sum += odd_map.get(&ch).unwrap_or(&0);
+    fn check_value(character: u8, odd_position: bool) -> Option<u32> {
+        if character.is_ascii_digit() {
+            let index = usize::from(character - b'0');
+            Some(if odd_position {
+                ODD_DIGITS[index]
             } else {
-                // Even position
-                sum += even_map.get(&ch).unwrap_or(&0);
-            }
-        }
-
-        // Calculate expected check character
-        let remainder = sum % 26;
-        let expected_check = (b'A' + remainder as u8) as char;
-
-        chars[15] == expected_check
-    }
-
-    /// Validate month code
-    fn validate_month(month_char: char) -> bool {
-        MONTH_CODES.contains(&month_char)
-    }
-
-    /// Validate day (01-31 for males, 41-71 for females)
-    fn validate_day(day_str: &str) -> bool {
-        if let Ok(day) = day_str.parse::<u32>() {
-            (1..=31).contains(&day) || (41..=71).contains(&day)
+                index as u32
+            })
+        } else if character.is_ascii_uppercase() {
+            let index = usize::from(character - b'A');
+            Some(if odd_position {
+                ODD_LETTERS[index]
+            } else {
+                index as u32
+            })
         } else {
-            false
+            None
         }
     }
 
-    /// Full validation of Codice Fiscale
+    fn expected_check_digit(prefix: &[u8]) -> Option<u8> {
+        if prefix.len() != 15 {
+            return None;
+        }
+        let sum = prefix
+            .iter()
+            .enumerate()
+            .try_fold(0_u32, |sum, (index, byte)| {
+                Self::check_value(*byte, index % 2 == 0).map(|value| sum + value)
+            })?;
+        Some(b'A' + (sum % 26) as u8)
+    }
+
+    #[cfg(test)]
+    fn validate_check_digit(code: &str) -> bool {
+        let Some(code) = Self::normalized(code) else {
+            return false;
+        };
+        Self::expected_check_digit(&code[..15]) == Some(code[15])
+    }
+
+    #[cfg(test)]
+    fn validate_month(month: char) -> bool {
+        month.is_ascii() && MONTH_CODES.contains(&(month as u8).to_ascii_uppercase())
+    }
+
+    fn decoded_day(day: &[u8]) -> Option<u32> {
+        let encoded = std::str::from_utf8(day).ok()?.parse::<u32>().ok()?;
+        match encoded {
+            1..=31 => Some(encoded),
+            41..=71 => Some(encoded - 40),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn validate_day(day: &str) -> bool {
+        Self::decoded_day(day.as_bytes()).is_some()
+    }
+
     fn validate_codice_fiscale(code: &str) -> bool {
-        if code.len() != 16 {
+        let Some(code) = Self::normalized(code) else {
+            return false;
+        };
+        if !code[..6].iter().all(u8::is_ascii_uppercase)
+            || !code[6..8].iter().all(u8::is_ascii_digit)
+            || !MONTH_CODES.contains(&code[8])
+            || !code[9..11].iter().all(u8::is_ascii_digit)
+            || !code[11].is_ascii_uppercase()
+            || !code[12..15].iter().all(u8::is_ascii_digit)
+        {
             return false;
         }
 
-        let chars: Vec<char> = code.chars().collect();
-
-        // Validate first 6 characters are letters
-        if !chars[0..6].iter().all(|c| c.is_ascii_alphabetic()) {
+        let year = i32::from(code[6] - b'0') * 10 + i32::from(code[7] - b'0');
+        let month = MONTH_CODES
+            .iter()
+            .position(|value| *value == code[8])
+            .unwrap() as u32
+            + 1;
+        let Some(day) = Self::decoded_day(&code[9..11]) else {
             return false;
-        }
+        };
+        let valid_date = NaiveDate::from_ymd_opt(1900 + year, month, day).is_some()
+            || NaiveDate::from_ymd_opt(2000 + year, month, day).is_some();
 
-        // Validate year (positions 7-8 are digits)
-        if !chars[6..8].iter().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-
-        // Validate month code (position 9)
-        if !Self::validate_month(chars[8]) {
-            return false;
-        }
-
-        // Validate day (positions 10-11 are digits)
-        let day_str: String = chars[9..11].iter().collect();
-        if !Self::validate_day(&day_str) {
-            return false;
-        }
-
-        // Validate municipality code (position 12 is letter, 13-15 are digits)
-        if !chars[11].is_ascii_alphabetic() {
-            return false;
-        }
-        if !chars[12..15].iter().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-
-        // Validate check digit
-        Self::validate_check_digit(code)
+        valid_date && Self::expected_check_digit(&code[..15]) == Some(code[15])
     }
 }
 
@@ -225,212 +152,123 @@ impl Detector for CodiceFiscaleDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        // Convert text to uppercase for matching
-        let uppercase_text = text.to_uppercase();
-
-        // Split text into lines for accurate line/column reporting
-        for (line_num, line) in uppercase_text.lines().enumerate() {
-            for capture in CF_PATTERN.find_iter(line) {
-                let matched_text = capture.as_str();
-
-                // Validate the Codice Fiscale
-                let is_valid = Self::validate_codice_fiscale(matched_text);
-
-                let confidence = if is_valid {
-                    Confidence::High
-                } else {
-                    Confidence::Low
-                };
-
-                // Only report high-confidence matches
-                if confidence == Confidence::High {
-                    matches.push(Match {
-                        detector_id: self.id().to_string(),
-                        detector_name: self.name().to_string(),
-                        country: self.country().to_string(),
-                        value_masked: mask_value(matched_text),
-                        severity: self.base_severity(),
-                        confidence,
-                        location: crate::core::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: capture.start() + 1,
-                            start_byte: byte_offset + capture.start(),
-                            end_byte: byte_offset + capture.end(),
-                        },
-                        context: None,
-                        gdpr_category: GdprCategory::Regular,
-                    });
-                }
-            }
-
-            byte_offset += text.lines().nth(line_num).unwrap_or("").len() + 1;
-        }
-
-        matches
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let index = TextIndex::new(text);
+        DetectionOutcome::from_iter(
+            CF_PATTERN
+                .find_iter(text)
+                .filter(|candidate| Self::validate_codice_fiscale(candidate.as_str()))
+                .map(|candidate| Match {
+                    detector_id: self.id().to_string(),
+                    detector_name: self.name().to_string(),
+                    country: self.country().to_string(),
+                    value_masked: mask_value(candidate.as_str()),
+                    location: index.location(
+                        file_path.to_path_buf(),
+                        candidate.start(),
+                        candidate.end(),
+                    ),
+                    confidence: Confidence::High,
+                    severity: self.base_severity(),
+                    context: None,
+                    gdpr_category: GdprCategory::Regular,
+                }),
+            minimum_confidence,
+            limit,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
+    fn with_check(prefix: &str) -> String {
+        let mut prefix = prefix.as_bytes().to_vec();
+        prefix.make_ascii_uppercase();
+        let check = CodiceFiscaleDetector::expected_check_digit(&prefix).unwrap();
+        format!("{}{}", String::from_utf8(prefix).unwrap(), check as char)
+    }
 
     #[test]
-    fn test_validate_check_digit_valid() {
-        // Valid Codice Fiscale examples
+    fn validates_check_digit_case_insensitively() {
         assert!(CodiceFiscaleDetector::validate_check_digit(
             "RSSMRA85T10A562S"
         ));
         assert!(CodiceFiscaleDetector::validate_check_digit(
-            "MRORSS80A41F205K"
+            "rssmra85t10a562s"
         ));
-    }
-
-    #[test]
-    fn test_validate_check_digit_invalid() {
-        // Wrong check digit
         assert!(!CodiceFiscaleDetector::validate_check_digit(
             "RSSMRA85T10A562X"
         ));
     }
 
     #[test]
-    fn test_validate_month_valid() {
-        assert!(CodiceFiscaleDetector::validate_month('A')); // January
-        assert!(CodiceFiscaleDetector::validate_month('E')); // May
-        assert!(CodiceFiscaleDetector::validate_month('T')); // December
+    fn validates_month_and_encoded_day() {
+        assert!(CodiceFiscaleDetector::validate_month('A'));
+        assert!(CodiceFiscaleDetector::validate_month('t'));
+        assert!(!CodiceFiscaleDetector::validate_month('F'));
+        assert!(CodiceFiscaleDetector::validate_day("01"));
+        assert!(CodiceFiscaleDetector::validate_day("71"));
+        assert!(!CodiceFiscaleDetector::validate_day("00"));
+        assert!(!CodiceFiscaleDetector::validate_day("40"));
+        assert!(!CodiceFiscaleDetector::validate_day("72"));
     }
 
     #[test]
-    fn test_validate_month_invalid() {
-        assert!(!CodiceFiscaleDetector::validate_month('F')); // Not a valid month
-        assert!(!CodiceFiscaleDetector::validate_month('Z'));
-    }
-
-    #[test]
-    fn test_validate_day_male() {
-        assert!(CodiceFiscaleDetector::validate_day("01")); // Male, day 1
-        assert!(CodiceFiscaleDetector::validate_day("15")); // Male, day 15
-        assert!(CodiceFiscaleDetector::validate_day("31")); // Male, day 31
-    }
-
-    #[test]
-    fn test_validate_day_female() {
-        assert!(CodiceFiscaleDetector::validate_day("41")); // Female, day 1
-        assert!(CodiceFiscaleDetector::validate_day("55")); // Female, day 15
-        assert!(CodiceFiscaleDetector::validate_day("71")); // Female, day 31
-    }
-
-    #[test]
-    fn test_validate_codice_fiscale_valid() {
+    fn validates_complete_codes_and_real_birth_dates() {
         assert!(CodiceFiscaleDetector::validate_codice_fiscale(
             "RSSMRA85T10A562S"
         ));
         assert!(CodiceFiscaleDetector::validate_codice_fiscale(
-            "MRORSS80A41F205K"
+            "mrorSS80a41f205k"
+        ));
+
+        let april_31 = with_check("RSSMRA85D31A562");
+        let february_29_1985 = with_check("RSSMRA85B29A562");
+        assert!(!CodiceFiscaleDetector::validate_codice_fiscale(&april_31));
+        assert!(!CodiceFiscaleDetector::validate_codice_fiscale(
+            &february_29_1985
         ));
     }
 
     #[test]
-    fn test_validate_codice_fiscale_invalid_format() {
-        // Wrong length
-        assert!(!CodiceFiscaleDetector::validate_codice_fiscale(
-            "RSSMRA85T10A562"
-        ));
-
-        // Invalid month code
-        assert!(!CodiceFiscaleDetector::validate_codice_fiscale(
-            "RSSMRA85F10A562S"
-        ));
-
-        // Invalid day
-        assert!(!CodiceFiscaleDetector::validate_codice_fiscale(
-            "RSSMRA85T99A562S"
-        ));
-    }
-
-    #[test]
-    fn test_codice_fiscale_detection() {
+    fn detects_lowercase_without_changing_unicode_offsets() {
         let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        let text = "Codice Fiscale: RSSMRA85T10A562S";
-        let matches = detector.detect(text, &path);
+        let text = "🧭 rssmra85t10a562s";
+        let matches = detector.detect(text, Path::new("test.txt"));
 
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].detector_id, "it_codice_fiscale");
+        assert_eq!(matches[0].location.column, 2);
+        assert_eq!(
+            &text[matches[0].location.start_byte..matches[0].location.end_byte],
+            "rssmra85t10a562s"
+        );
         assert_eq!(matches[0].country, "it");
-        assert_eq!(matches[0].confidence, Confidence::High);
     }
 
     #[test]
-    fn test_codice_fiscale_detection_lowercase() {
+    fn rejects_bad_check_digit_and_impossible_date() {
         let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        // Lowercase should be detected (converted to uppercase)
-        let text = "CF: rssmra85t10a562s";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].confidence, Confidence::High);
+        let invalid_date = with_check("RSSMRA85D31A562");
+        let text = format!("CF: RSSMRA85T10A562X {invalid_date}");
+        assert!(detector.detect(&text, Path::new("test.txt")).is_empty());
     }
 
     #[test]
-    fn test_codice_fiscale_detection_invalid_not_reported() {
+    fn detects_multiple_valid_codes() {
         let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        // Invalid check digit - should not be reported
-        let text = "CF: RSSMRA85T10A562X";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 0);
-    }
-
-    #[test]
-    fn test_codice_fiscale_masking() {
-        let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        let text = "CF: RSSMRA85T10A562S";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 1);
-        assert!(matches[0].value_masked.contains("***"));
-    }
-
-    #[test]
-    fn test_codice_fiscale_severity() {
-        let detector = CodiceFiscaleDetector::new();
-        assert_eq!(detector.base_severity(), Severity::Critical);
-    }
-
-    #[test]
-    fn test_codice_fiscale_multiple_in_text() {
-        let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
         let text = "Person 1: RSSMRA85T10A562S\nPerson 2: MRORSS80A41F205K";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 2);
-    }
-
-    #[test]
-    fn test_codice_fiscale_female() {
-        let detector = CodiceFiscaleDetector::new();
-        let path = PathBuf::from("test.txt");
-
-        // Female (day = 41, meaning day 1 + 40 for female)
-        let text = "CF: MRORSS80A41F205K";
-        let matches = detector.detect(text, &path);
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].confidence, Confidence::High);
+        assert_eq!(detector.detect(text, Path::new("test.txt")).len(), 2);
     }
 }

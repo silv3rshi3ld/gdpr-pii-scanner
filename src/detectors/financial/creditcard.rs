@@ -2,10 +2,12 @@
 ///
 /// Detects Visa, Mastercard, American Express, and other major cards.
 /// Uses Luhn checksum to minimize false positives.
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity};
 use crate::utils::{mask_credit_card, validate_luhn};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// Regex patterns for different card types
@@ -78,10 +80,22 @@ impl Detector for CreditCardDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        for (line_num, line) in text.lines().enumerate() {
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
+        let mut seen_starts = BTreeSet::new();
+        let text_index = crate::core::types::TextIndex::new(text);
+
+        'scan: for (line_num, line) in text.lines().enumerate() {
             // Try all patterns
             let patterns = [
                 &*VISA_PATTERN,
@@ -101,38 +115,36 @@ impl Detector for CreditCardDetector {
                         .collect();
 
                     // Validate with Luhn algorithm
-                    if validate_luhn(&digits) {
+                    let start = text_index.location_from_line_column(
+                        file_path.to_path_buf(),
+                        line_num + 1,
+                        capture.start(),
+                        capture.end() - capture.start(),
+                    );
+                    if validate_luhn(&digits) && seen_starts.insert(start.start_byte) {
                         let card_type = self.detect_card_type(&digits);
 
-                        matches.push(Match {
+                        if !matches.push(Match {
                             detector_id: self.id().to_string(),
                             detector_name: format!("{} ({})", self.name(), card_type),
                             country: self.country().to_string(),
                             value_masked: mask_credit_card(&digits),
-                            location: crate::core::types::Location {
-                                file_path: file_path.to_path_buf(),
-                                line: line_num + 1,
-                                column: capture.start(),
-                                start_byte: byte_offset + capture.start(),
-                                end_byte: byte_offset + capture.end(),
-                            },
+                            location: start,
                             confidence: Confidence::High,
                             severity: self.base_severity(),
                             context: None,
                             gdpr_category: GdprCategory::Regular,
-                        });
+                        }) {
+                            break 'scan;
+                        }
                     }
                 }
             }
-
-            byte_offset += line.len() + 1;
         }
 
-        // Deduplicate (same card found by multiple patterns)
-        matches.sort_by_key(|m| m.location.start_byte);
-        matches.dedup_by_key(|m| m.location.start_byte);
-
-        matches
+        let mut outcome = matches.finish();
+        outcome.matches.sort_by_key(|m| m.location.start_byte);
+        outcome
     }
 
     fn validate(&self, value: &str) -> bool {
