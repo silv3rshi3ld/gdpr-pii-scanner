@@ -4,7 +4,7 @@ Version 0.6 formalises configuration, output, exit status, API input, release ar
 
 ## Choose an artifact
 
-The core binary includes file, document, and API scanning, detectors, plugins, and reporters. The full binary also includes PostgreSQL and MongoDB connectors. Both install a binary named `pii-radar`. Consume the Rust library through the source crate or crates.io package; its database APIs use the same feature split.
+The core binary includes file, document, and API scanning, detectors, plugins, and reporters. The full binary also includes PostgreSQL and MongoDB connectors. Both install a binary named `pii-radar`. Consume the Rust library directly from the source repository; its database APIs use the same feature split.
 
 Source builds continue to use the `database` feature for the connectors:
 

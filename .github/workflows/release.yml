@@ -215,15 +215,15 @@ jobs:
           test -s SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Publish stable crate before creating the GitHub release
+      - name: Publish stable crate when crates.io credentials are configured
         if: ${{ !contains(github.ref_name, '-') }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
         run: |
           if [[ -z "${CARGO_REGISTRY_TOKEN}" ]]; then
-            echo "CARGO_REGISTRY_TOKEN is required for a stable release." >&2
-            exit 1
+            echo "CARGO_REGISTRY_TOKEN is not configured; skipping optional crates.io publication."
+            exit 0
           fi
           crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "pii-radar") | .version')"
           published_version="$(curl --fail --silent --show-error https://crates.io/api/v1/crates/pii-radar \

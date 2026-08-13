@@ -18,7 +18,7 @@ Binary release bundles are labelled **core** and **full**. Both contain a binary
 | Scan PostgreSQL and MongoDB | No | Yes |
 
 MySQL, MariaDB, and SQLite scanning are not supported in 0.6.
-The source tree and crates.io package also expose the scanner as a Rust library; database APIs follow the same feature split.
+The source tree also exposes the scanner as a Rust library; database APIs follow the same feature split.
 
 ## Quick start
 
