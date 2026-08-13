@@ -4,7 +4,8 @@
 /// Format: X/Y/Z followed by 7 digits and a letter (e.g., X1234567L)
 /// The letter is calculated using modulus 23 algorithm (same as DNI).
 /// X=0, Y=1, Z=2 for calculation purposes.
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity};
 use crate::utils::{mask_value, validate_spain_id};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -48,10 +49,21 @@ impl Detector for NieDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
 
-        for (line_num, line) in text.lines().enumerate() {
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
+        let text_index = crate::core::types::TextIndex::new(text);
+
+        'scan: for (line_num, line) in text.lines().enumerate() {
             for capture in NIE_PATTERN.find_iter(line) {
                 let matched_text = capture.as_str();
 
@@ -66,31 +78,31 @@ impl Detector for NieDetector {
                 };
 
                 // Only report high-confidence matches (strict mode)
-                if confidence == Confidence::High {
-                    matches.push(Match {
-                        detector_id: self.id().to_string(),
-                        detector_name: self.name().to_string(),
-                        country: self.country().to_string(),
-                        value_masked: mask_value(matched_text),
-                        location: crate::core::types::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1,
-                            column: capture.start(),
-                            start_byte: byte_offset + capture.start(),
-                            end_byte: byte_offset + capture.end(),
-                        },
-                        confidence,
-                        severity: self.base_severity(),
-                        context: None,
-                        gdpr_category: GdprCategory::Regular,
-                    });
+                if confidence != Confidence::High {
+                    continue;
+                }
+                if !matches.push(Match {
+                    detector_id: self.id().to_string(),
+                    detector_name: self.name().to_string(),
+                    country: self.country().to_string(),
+                    value_masked: mask_value(matched_text),
+                    location: text_index.location_from_line_column(
+                        file_path.to_path_buf(),
+                        line_num + 1,
+                        capture.start(),
+                        capture.end() - capture.start(),
+                    ),
+                    confidence,
+                    severity: self.base_severity(),
+                    context: None,
+                    gdpr_category: GdprCategory::Regular,
+                }) {
+                    break 'scan;
                 }
             }
-
-            byte_offset += line.len() + 1;
         }
 
-        matches
+        matches.finish()
     }
 }
 

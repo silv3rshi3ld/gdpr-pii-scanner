@@ -1,0 +1,19 @@
+# Schema-versioned example. The example value is deliberately unassigned.
+schema_version = 1
+id = "example_us_ssn"
+name = "Example US SSN"
+country = "us"
+category = "government_identifier"
+description = "Matches the common dashed SSN shape for review."
+severity = "high"
+examples = ["000-00-0000"]
+context_keywords = ["social security", "ssn"]
+
+[[patterns]]
+pattern = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+confidence = "medium"
+description = "Three, two, and four digits separated by hyphens."
+
+[validation]
+min_length = 11
+max_length = 11

@@ -1,0 +1,19 @@
+# Schema-versioned example. It checks shape only, not the official TFN checksum.
+schema_version = 1
+id = "example_au_tfn"
+name = "Example Australian TFN"
+country = "au"
+category = "government_identifier"
+description = "Matches a nine-digit TFN shape for manual review."
+severity = "high"
+examples = ["000 000 000"]
+context_keywords = ["tax file number", "tfn"]
+
+[[patterns]]
+pattern = "\\b\\d{3}[ -]?\\d{3}[ -]?\\d{3}\\b"
+confidence = "medium"
+description = "Nine digits with optional spaces or hyphens."
+
+[validation]
+min_length = 9
+max_length = 11

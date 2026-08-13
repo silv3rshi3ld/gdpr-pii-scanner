@@ -1,45 +1,49 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
-Only the latest minor release line of `pii-radar` receives security fixes.
+Security fixes are provided for the latest minor release line.
 
 | Version | Supported |
-| ------- | --------- |
-| 0.5.x   | ✅        |
-| < 0.5   | ❌        |
+| --- | :---: |
+| 0.6.x | Yes |
+| 0.5.x and earlier | No |
 
-## Reporting a Vulnerability
+Users of unsupported versions should upgrade before requesting a fix.
 
-**Please do not report security vulnerabilities through public GitHub issues.**
+## Reporting a vulnerability
 
-Instead, report them privately through one of the following channels:
+Do not open a public issue for a suspected vulnerability. Use GitHub's [private vulnerability reporting](https://github.com/silv3rshi3ld/gdpr-pii-scanner/security/advisories/new) and include:
 
-1. **Preferred:** Use GitHub's [private vulnerability reporting](https://github.com/silv3rshi3ld/gdpr-pii-scanner/security/advisories/new) for this repository.
-2. Alternatively, open a minimal placeholder issue asking maintainers to contact you privately, without disclosing details.
+- the affected version or commit;
+- the affected command, library API, or plugin path;
+- reproduction steps using synthetic data;
+- the expected and observed behaviour;
+- the likely impact and any known mitigations.
 
-Please include:
+Remove personal data, credentials, database contents, access tokens, and private endpoints from the report. If a minimal reproducer must contain sensitive material, describe that need first and wait for a protected transfer method.
 
-- A description of the vulnerability and its impact
-- Steps to reproduce (proof-of-concept if available)
-- Affected version(s)
-- Any suggested mitigation
-
-## Response Expectations
-
-- We aim to acknowledge reports within **5 business days**.
-- We aim to provide a remediation plan or patch within **30 days** for high-severity issues.
-- Credit will be given to reporters in release notes unless anonymity is requested.
+We aim to acknowledge reports within five business days. For a confirmed high-severity issue, we aim to provide a remediation plan or patch within 30 days. Timing may vary with complexity and coordinated-disclosure needs. Please allow maintainers a reasonable opportunity to investigate and release a fix before public disclosure.
 
 ## Scope
 
 In scope:
 
-- The `pii-radar` crate (binary and library)
-- Built-in detectors, extractors, scanners, and reporters
-- Default plugin loading behavior
+- the published `pii-radar` binary and Rust library;
+- built-in detectors, parsers, extractors, and output renderers;
+- API and supported database scanning;
+- configuration discovery and the default TOML plugin loader.
 
-Out of scope:
+Generally out of scope:
 
-- Third-party plugins or downstream forks
-- Issues that require an attacker to already have local code execution
+- third-party detector plugins and downstream integrations;
+- unsupported versions or platforms;
+- findings that require an operator to run untrusted code intentionally;
+- denial of service based only on limits that an authenticated operator explicitly disabled;
+- scanner accuracy reports without a security impact.
+
+Accuracy problems and ordinary bugs can be reported with the public issue templates after all sensitive data has been removed.
+
+## Operational guidance
+
+Scanning can expose sensitive content to the process, terminal, report files, API servers, and database audit logs. Run with least-privilege credentials, set response and file-size limits, prefer redacted output, restrict report permissions, and delete temporary artifacts according to your retention policy. See [security and privacy](docs/security-and-privacy.md) for details.

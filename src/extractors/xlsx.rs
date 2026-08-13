@@ -1,7 +1,9 @@
 /// XLSX text extraction using calamine
 /// Re-enabled in v0.4.0 using zip 4.2 for compatibility with calamine 0.32
-use super::{ExtractorError, TextExtractor};
-use calamine::{open_workbook_auto, Data, Reader};
+use super::{append_limited, ExtractionLimits, ExtractorError, TextExtractor};
+use crate::safe_io::{read_opened_bounded, OpenedRegularFile};
+use calamine::{open_workbook_auto_from_rs, Data, Reader};
+use std::io::Cursor;
 use std::path::Path;
 
 pub struct XlsxExtractor;
@@ -14,8 +16,22 @@ impl XlsxExtractor {
 
 impl TextExtractor for XlsxExtractor {
     fn extract(&self, path: &Path) -> Result<String, ExtractorError> {
-        // Open the workbook (supports .xlsx, .xlsm, .xlsb, .xls)
-        let mut workbook = open_workbook_auto(path).map_err(|e| {
+        self.extract_with_limits(path, ExtractionLimits::default())
+    }
+
+    fn extract_opened_with_limits(
+        &self,
+        _source_path: &Path,
+        opened: OpenedRegularFile,
+        limits: ExtractionLimits,
+    ) -> Result<String, ExtractorError> {
+        limits.validate()?;
+        let source = read_opened_bounded(opened, limits.max_input_bytes)?;
+
+        // The slice-backed cursor is cheap to clone while format detection
+        // tries the supported workbook readers.
+        let cursor = Cursor::new(source.as_slice());
+        let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|e| {
             ExtractorError::CorruptedFile(format!("Failed to open Excel file: {}", e))
         })?;
 
@@ -23,44 +39,73 @@ impl TextExtractor for XlsxExtractor {
 
         // Get all sheet names
         let sheet_names = workbook.sheet_names().to_vec();
+        if sheet_names.len() > limits.max_workbook_sheets {
+            return Err(ExtractorError::LimitExceeded(format!(
+                "workbook has {} sheets; maximum is {}",
+                sheet_names.len(),
+                limits.max_workbook_sheets
+            )));
+        }
+
+        let mut visited_cells = 0_usize;
 
         // Extract text from each sheet
         for sheet_name in sheet_names {
-            if let Ok(range) = workbook.worksheet_range(&sheet_name) {
-                // Add sheet header
-                text.push_str(&format!("=== Sheet: {} ===\n", sheet_name));
+            let range = workbook.worksheet_range(&sheet_name).map_err(|error| {
+                ExtractorError::ExtractionFailed(format!(
+                    "failed to read sheet '{}': {}",
+                    sheet_name, error
+                ))
+            })?;
+            let (height, width) = range.get_size();
+            visited_cells = visited_cells.saturating_add(height.saturating_mul(width));
+            if visited_cells > limits.max_workbook_cells {
+                return Err(ExtractorError::LimitExceeded(format!(
+                    "workbook cell range exceeds {} cells",
+                    limits.max_workbook_cells
+                )));
+            }
 
-                // Iterate through rows
-                for (row_idx, row) in range.rows().enumerate() {
-                    let mut row_text = Vec::new();
+            append_limited(
+                &mut text,
+                &format!("=== Sheet: {} ===\n", sheet_name),
+                limits.max_output_bytes,
+            )?;
 
-                    // Extract text from each cell
-                    for cell in row {
-                        let cell_str = match cell {
-                            Data::Int(i) => Some(i.to_string()),
-                            Data::Float(f) => Some(f.to_string()),
-                            Data::String(s) => Some(s.clone()),
-                            Data::Bool(b) => Some(b.to_string()),
-                            Data::DateTime(dt) => Some(format!("{}", dt)),
-                            Data::DateTimeIso(dt) => Some(dt.clone()),
-                            Data::DurationIso(d) => Some(d.clone()),
-                            Data::Error(e) => Some(format!("ERROR: {:?}", e)),
-                            Data::Empty => None, // Skip empty cells
-                        };
+            for (row_idx, row) in range.rows().enumerate() {
+                let mut row_text = String::new();
 
-                        if let Some(txt) = cell_str {
-                            row_text.push(txt);
+                for cell in row {
+                    let cell_str = match cell {
+                        Data::Int(i) => Some(i.to_string()),
+                        Data::Float(f) => Some(f.to_string()),
+                        Data::String(s) => Some(s.clone()),
+                        Data::Bool(b) => Some(b.to_string()),
+                        Data::DateTime(dt) => Some(format!("{}", dt)),
+                        Data::DateTimeIso(dt) => Some(dt.clone()),
+                        Data::DurationIso(d) => Some(d.clone()),
+                        Data::Error(e) => Some(format!("ERROR: {:?}", e)),
+                        Data::Empty => None,
+                    };
+
+                    if let Some(value) = cell_str {
+                        if !row_text.is_empty() {
+                            append_limited(&mut row_text, " | ", limits.max_output_bytes)?;
                         }
-                    }
-
-                    // Only add non-empty rows
-                    if !row_text.is_empty() {
-                        text.push_str(&format!("Row {}: {}\n", row_idx + 1, row_text.join(" | ")));
+                        append_limited(&mut row_text, &value, limits.max_output_bytes)?;
                     }
                 }
 
-                text.push('\n'); // Add blank line between sheets
+                if !row_text.is_empty() {
+                    append_limited(
+                        &mut text,
+                        &format!("Row {}: {}\n", row_idx + 1, row_text),
+                        limits.max_output_bytes,
+                    )?;
+                }
             }
+
+            append_limited(&mut text, "\n", limits.max_output_bytes)?;
         }
 
         Ok(text)
@@ -157,6 +202,21 @@ mod tests {
     fn test_xlsx_extractor_default() {
         let extractor = XlsxExtractor;
         assert_eq!(extractor.name(), "Excel Extractor");
+    }
+
+    #[test]
+    fn test_xlsx_input_limit_is_enforced_before_parsing() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(tmp.path(), b"not a workbook").unwrap();
+        let limits = ExtractionLimits {
+            max_input_bytes: 2,
+            ..ExtractionLimits::default()
+        };
+
+        assert!(matches!(
+            XlsxExtractor.extract_with_limits(tmp.path(), limits),
+            Err(ExtractorError::LimitExceeded(_))
+        ));
     }
 
     // Note: Real XLSX extraction tests with actual spreadsheets would require

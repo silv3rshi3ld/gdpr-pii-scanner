@@ -1,6 +1,8 @@
-/// Terminal/CLI reporter with colored output
-use crate::core::{GdprCategory, ScanResults, Severity};
-use colored::*;
+//! Human-readable terminal output.
+
+use crate::core::{GdprCategory, ScanResults, ScanStatus, Severity};
+use colored::Colorize;
+use std::collections::BTreeMap;
 
 pub struct TerminalReporter {
     show_full_paths: bool,
@@ -26,234 +28,178 @@ impl TerminalReporter {
     }
 
     pub fn print_summary(&self, results: &ScanResults) {
-        println!("\n{}", "═".repeat(80).bright_blue());
-        println!("{}", "  🎯 SCAN COMPLETE".bright_cyan().bold());
-        println!("{}", "═".repeat(80).bright_blue());
+        let status = match results.status {
+            ScanStatus::Complete => "complete".green(),
+            ScanStatus::Partial => "partial".yellow(),
+            ScanStatus::Failed => "failed".red(),
+        };
 
-        // Overall statistics
-        println!("\n{}", "📊 Statistics:".bold());
+        println!("\n{}", "Scan summary".bold());
+        println!("  Status:              {status}");
+        println!("  Sources scanned:     {}", results.total_files);
         println!(
-            "  Files scanned:    {}",
-            results.total_files.to_string().cyan()
+            "  Sources with matches: {}",
+            results
+                .files
+                .iter()
+                .filter(|file| !file.matches.is_empty())
+                .count()
         );
-
-        // Show extraction statistics if any documents were extracted
-        if results.extracted_files > 0 {
-            println!(
-                "  Documents extracted: {}",
-                results.extracted_files.to_string().cyan()
-            );
-            if results.extraction_failures > 0 {
-                println!(
-                    "  Extraction failures: {}",
-                    results.extraction_failures.to_string().red()
-                );
-            }
+        println!("  Matches:             {}", results.total_matches);
+        println!("  Duration:            {} ms", results.total_time_ms);
+        if results.error_count > 0 {
+            println!("  Source errors:        {}", results.error_count);
+        }
+        if results.truncated_files > 0 {
+            println!("  Truncated sources:    {}", results.truncated_files);
+            println!("  Omitted matches:      {}", results.omitted_matches);
+        }
+        if results.extracted_files > 0 || results.extraction_failures > 0 {
+            println!("  Documents extracted: {}", results.extracted_files);
+            println!("  Extraction failures: {}", results.extraction_failures);
         }
 
-        let files_with_pii = results
-            .files
-            .iter()
-            .filter(|f| !f.matches.is_empty())
-            .count();
-        println!(
-            "  Files with PII:   {}",
-            files_with_pii.to_string().yellow()
-        );
-        println!(
-            "  Total matches:    {}",
-            results.total_matches.to_string().red().bold()
-        );
-        println!(
-            "  Scan duration:    {} ms",
-            results.total_time_ms.to_string().green()
-        );
-
-        // Severity breakdown
         if results.total_matches > 0 {
-            println!("\n{}", "⚠️  Severity Breakdown:".bold());
+            println!("\n{}", "Severity".bold());
+            println!("  Critical: {}", results.by_severity.critical);
+            println!("  High:     {}", results.by_severity.high);
+            println!("  Medium:   {}", results.by_severity.medium);
+            println!("  Low:      {}", results.by_severity.low);
 
-            if results.by_severity.critical > 0 {
-                println!(
-                    "  🔴 Critical:  {}",
-                    results.by_severity.critical.to_string().red().bold()
-                );
+            let mut detector_counts = BTreeMap::new();
+            for finding in results.files.iter().flat_map(|file| &file.matches) {
+                *detector_counts
+                    .entry(sanitize_terminal(&finding.detector_name))
+                    .or_insert(0_usize) += 1;
             }
-            if results.by_severity.high > 0 {
-                println!(
-                    "  🟠 High:      {}",
-                    results.by_severity.high.to_string().red()
-                );
+            println!("\n{}", "Detectors".bold());
+            for (detector, count) in detector_counts {
+                println!("  {detector}: {count}");
             }
-            if results.by_severity.medium > 0 {
+
+            let special_count = results
+                .files
+                .iter()
+                .flat_map(|file| &file.matches)
+                .filter(|finding| matches!(finding.gdpr_category, GdprCategory::Special { .. }))
+                .count();
+            if special_count > 0 {
                 println!(
-                    "  🟡 Medium:    {}",
-                    results.by_severity.medium.to_string().yellow()
-                );
-            }
-            if results.by_severity.low > 0 {
-                println!(
-                    "  🔵 Low:       {}",
-                    results.by_severity.low.to_string().blue()
+                    "\n  {special_count} finding(s) were context-classified under GDPR Article 9 or 10 categories."
                 );
             }
         }
-
-        // Detector breakdown
-        println!("\n{}", "🔍 Detector Matches:".bold());
-        let mut detector_counts: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-
-        for file in &results.files {
-            for m in &file.matches {
-                *detector_counts.entry(m.detector_name.clone()).or_insert(0) += 1;
-            }
-        }
-
-        for (detector, count) in detector_counts.iter() {
-            println!(
-                "  {} {}",
-                "→".cyan(),
-                format!("{}: {}", detector, count).white()
-            );
-        }
-
-        // GDPR Art. 9 special category warnings
-        let special_category_count = results
-            .files
-            .iter()
-            .flat_map(|f| &f.matches)
-            .filter(|m| matches!(m.gdpr_category, GdprCategory::Special { .. }))
-            .count();
-
-        if special_category_count > 0 {
-            println!(
-                "\n{}",
-                "⚠️  GDPR Article 9 - Special Category Data:".red().bold()
-            );
-            println!(
-                "  {} matches contain sensitive context (medical/biometric/genetic/criminal)",
-                special_category_count.to_string().red().bold()
-            );
-            println!("  These require extra protection under GDPR!");
-        }
-
-        println!();
     }
 
     pub fn print_detailed_results(&self, results: &ScanResults) {
         if results.total_matches == 0 {
-            println!("\n{}", "✅ No PII detected!".green().bold());
-            return;
+            if results.status == ScanStatus::Complete {
+                println!("No reportable findings.");
+            } else {
+                println!("No findings were reported, but the scan was incomplete.");
+            }
+        } else {
+            println!("{}", "Findings".bold());
         }
 
-        println!("\n{}", "═".repeat(80).bright_blue());
-        println!("{}", "  📋 DETAILED FINDINGS".bright_cyan().bold());
-        println!("{}", "═".repeat(80).bright_blue());
-
         for file in &results.files {
-            if file.matches.is_empty() {
+            if file.matches.is_empty() && file.error.is_none() && !file.truncated {
                 continue;
             }
 
-            // File header
-            println!("\n{}", "─".repeat(80).bright_black());
-            let path_display = if self.show_full_paths {
+            let displayed_path = if self.show_full_paths {
                 file.path.display().to_string()
             } else {
                 file.path
                     .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
+                    .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| file.path.display().to_string())
             };
+            println!("\n{}", sanitize_terminal(&displayed_path).bold());
 
-            println!(
-                "{} {} {} matches",
-                "📄".cyan(),
-                path_display.bold(),
-                format!("({})", file.matches.len()).yellow()
-            );
+            if let Some(error) = &file.error {
+                println!("  Error: {}", sanitize_terminal(error).red());
+            }
+            if file.truncated {
+                println!(
+                    "  Results truncated; {} match(es) omitted.",
+                    file.omitted_matches
+                );
+            }
 
-            // Print each match
-            for (idx, m) in file.matches.iter().enumerate() {
-                println!();
-
-                // Match header with severity
-                let severity_icon = match m.severity {
-                    Severity::Critical => "🔴",
-                    Severity::High => "🟠",
-                    Severity::Medium => "🟡",
-                    Severity::Low => "🔵",
+            for (index, finding) in file.matches.iter().enumerate() {
+                let severity = match finding.severity {
+                    Severity::Critical => finding.severity.to_string().red().bold(),
+                    Severity::High => finding.severity.to_string().red(),
+                    Severity::Medium => finding.severity.to_string().yellow(),
+                    Severity::Low => finding.severity.to_string().normal(),
                 };
-
                 println!(
-                    "  {} Match #{} - {}",
-                    severity_icon,
-                    idx + 1,
-                    m.detector_name.yellow().bold()
+                    "  {}. {} [{}]",
+                    index + 1,
+                    sanitize_terminal(&finding.detector_name),
+                    severity
+                );
+                println!(
+                    "     value={} country={} confidence={} line={} column={}",
+                    sanitize_terminal(&finding.value_masked),
+                    sanitize_terminal(&finding.country.to_uppercase()),
+                    finding.confidence,
+                    finding.location.line,
+                    finding.location.column
                 );
 
-                // Location
-                println!(
-                    "    Location:   Line {}, Column {}",
-                    m.location.line.to_string().cyan(),
-                    m.location.column.to_string().cyan()
-                );
-
-                // Masked value
-                println!("    Value:      {}", m.value_masked.red().bold());
-
-                // Confidence
-                println!("    Confidence: {}", format!("{:?}", m.confidence).green());
-
-                // GDPR category
-                match &m.gdpr_category {
-                    GdprCategory::Regular => {
-                        println!("    GDPR:       Regular PII");
-                    }
-                    GdprCategory::Special {
-                        category,
-                        detected_keywords,
-                    } => {
+                if let GdprCategory::Special {
+                    category,
+                    detected_keywords,
+                } = &finding.gdpr_category
+                {
+                    println!(
+                        "     context_category={}",
+                        sanitize_terminal(&category.to_string())
+                    );
+                    if !detected_keywords.is_empty() {
                         println!(
-                            "    GDPR:       {} {} - {}",
-                            "⚠️ ".red(),
-                            "Special Category (Art. 9)".red().bold(),
-                            format!("{:?}", category).red()
+                            "     context_keywords={}",
+                            sanitize_terminal(&detected_keywords.join(", "))
                         );
-                        if !detected_keywords.is_empty() {
-                            println!("    Keywords:   {}", detected_keywords.join(", ").yellow());
-                        }
                     }
                 }
 
-                // Context (if available and enabled)
                 if self.show_context {
-                    if let Some(ctx) = &m.context {
-                        println!(
-                            "    Context:    \"{}[PII]{}\"",
-                            ctx.before
-                                .chars()
-                                .rev()
-                                .take(30)
-                                .collect::<String>()
-                                .chars()
-                                .rev()
-                                .collect::<String>(),
-                            ctx.after.chars().take(30).collect::<String>()
-                        );
+                    if let Some(context) = &finding.context {
+                        if let Some(snippet) = &context.redacted_snippet {
+                            println!("     redacted_context={}", sanitize_terminal(snippet));
+                        }
                     }
                 }
             }
         }
-
-        println!("\n{}", "═".repeat(80).bright_blue());
     }
 
     pub fn report(&self, results: &ScanResults) {
-        self.print_summary(results);
         self.print_detailed_results(results);
+        self.print_summary(results);
     }
+}
+
+/// Render untrusted metadata without permitting terminal control sequences or
+/// line injection. Newlines and tabs are shown as visible escape sequences.
+pub(crate) fn sanitize_terminal(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(output, "\\u{{{:x}}}", character as u32);
+            }
+            character => output.push(character),
+        }
+    }
+    output
 }
 
 impl Default for TerminalReporter {
@@ -265,76 +211,23 @@ impl Default for TerminalReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{
-        Confidence, ContextInfo, FileResult, Location, Match, SeverityCounts, SpecialCategory,
-    };
-    use std::path::PathBuf;
 
     #[test]
-    fn test_terminal_reporter_empty() {
-        let results = ScanResults {
-            files: vec![],
-            total_files: 10,
-            total_bytes: 0,
-            total_time_ms: 1500,
-            total_matches: 0,
-            by_severity: SeverityCounts::default(),
-            by_country: std::collections::HashMap::new(),
-            extracted_files: 0,
-            extraction_failures: 0,
-        };
-
-        let reporter = TerminalReporter::new();
-        reporter.report(&results); // Should not panic
+    fn terminal_metadata_cannot_inject_controls_or_lines() {
+        assert_eq!(
+            sanitize_terminal("name\n\x1b[31mred\r"),
+            "name\\n\\u{1b}[31mred\\r"
+        );
     }
 
     #[test]
-    fn test_terminal_reporter_with_matches() {
-        let mut file_result = FileResult::new(PathBuf::from("test.txt"));
-        file_result.matches.push(Match {
-            detector_id: "test".to_string(),
-            detector_name: "Test Detector".to_string(),
-            country: "nl".to_string(),
-            value_masked: "123****89".to_string(),
-            location: Location {
-                file_path: PathBuf::from("test.txt"),
-                line: 1,
-                column: 5,
-                start_byte: 5,
-                end_byte: 14,
-            },
-            confidence: Confidence::High,
-            severity: Severity::Critical,
-            context: Some(ContextInfo {
-                before: "Patient ".to_string(),
-                after: " diagnosed".to_string(),
-                keywords: vec!["patient".to_string()],
-                category: Some(SpecialCategory::Medical),
-            }),
-            gdpr_category: GdprCategory::Special {
-                category: SpecialCategory::Medical,
-                detected_keywords: vec!["patient".to_string()],
-            },
-        });
-
-        let results = ScanResults {
-            files: vec![file_result],
-            total_files: 1,
-            total_bytes: 100,
-            total_time_ms: 50,
-            total_matches: 1,
-            by_severity: SeverityCounts {
-                low: 0,
-                medium: 0,
-                high: 0,
-                critical: 1,
-            },
-            by_country: std::collections::HashMap::new(),
-            extracted_files: 0,
-            extraction_failures: 0,
-        };
-
+    fn reporters_accept_empty_and_partial_results() {
         let reporter = TerminalReporter::new();
-        reporter.report(&results); // Should not panic
+        reporter.report(&ScanResults::new());
+
+        let mut partial = ScanResults::new();
+        partial.status = ScanStatus::Partial;
+        partial.error_count = 1;
+        reporter.report(&partial);
     }
 }

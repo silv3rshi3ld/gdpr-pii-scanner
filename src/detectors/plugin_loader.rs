@@ -1,300 +1,405 @@
-/// Plugin loader for loading custom detectors from TOML files
-///
-/// Scans a directory for `.detector.toml` files and loads them as plugin detectors.
-use crate::detectors::plugin::{PluginConfig, PluginDetector};
+//! Loader and validator for declarative detector plugins.
+
+use crate::detectors::plugin::{
+    LengthUnit, MatchScope, PatternConfig, PluginConfig, PluginDetector, ValidationConfig,
+    PLUGIN_SCHEMA_VERSION,
+};
+use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Load all plugin detectors from a directory
+const MAX_PLUGIN_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, Default)]
+pub struct PluginLoadReport {
+    pub detectors: Vec<PluginDetector>,
+    pub warnings: Vec<String>,
+}
+
+/// Load canonical `*.detector.toml` files and deprecated `*.toml` filenames.
 ///
-/// # Arguments
-/// * `plugin_dir` - Directory to scan for `.detector.toml` files
-///
-/// # Returns
-/// * `Ok(Vec<PluginDetector>)` - List of successfully loaded plugins
-/// * `Err(String)` - Error message if directory cannot be read
-///
-/// # Example
-/// ```no_run
-/// use pii_radar::detectors::plugin_loader::load_plugins_from_directory;
-///
-/// let plugins = load_plugins_from_directory("./plugins").unwrap();
-/// println!("Loaded {} custom detectors", plugins.len());
-/// ```
+/// Any malformed file makes the operation fail, so a misspelled detector is never silently
+/// omitted. Legacy single-pattern files are accepted in v0.6 with a diagnostic.
+pub fn load_plugins_with_diagnostics<P: AsRef<Path>>(
+    plugin_dir: P,
+) -> Result<PluginLoadReport, String> {
+    let path = plugin_dir.as_ref();
+    if !path.exists() {
+        return Err(format!(
+            "plugin directory does not exist: {}",
+            path.display()
+        ));
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "plugin path is not a directory: {}",
+            path.display()
+        ));
+    }
+
+    let mut files = discover_plugin_files(path)?;
+    files.sort();
+    let mut report = PluginLoadReport::default();
+    let mut errors = Vec::new();
+    let mut ids = HashSet::new();
+
+    for file in files {
+        match load_plugin_from_file_with_diagnostic(&file) {
+            Ok((detector, warning)) => {
+                if !ids.insert(detector.config().id.clone()) {
+                    errors.push(format!(
+                        "{}: duplicate detector id '{}'",
+                        file.display(),
+                        detector.config().id
+                    ));
+                    continue;
+                }
+                if let Some(warning) = warning {
+                    report
+                        .warnings
+                        .push(format!("{}: {warning}", file.display()));
+                }
+                if !has_canonical_suffix(&file) {
+                    report.warnings.push(format!(
+                        "{}: legacy .toml plugin filename is deprecated; rename it with the .detector.toml suffix before v0.7",
+                        file.display()
+                    ));
+                }
+                report.detectors.push(detector);
+            }
+            Err(error) => errors.push(format!("{}: {error}", file.display())),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(report)
+    } else {
+        Err(format!(
+            "failed to load detector plugins:\n{}",
+            errors.join("\n")
+        ))
+    }
+}
+
 pub fn load_plugins_from_directory<P: AsRef<Path>>(
     plugin_dir: P,
 ) -> Result<Vec<PluginDetector>, String> {
-    let path = plugin_dir.as_ref();
-
-    if !path.exists() {
-        return Err(format!(
-            "Plugin directory does not exist: {}",
-            path.display()
-        ));
-    }
-
-    if !path.is_dir() {
-        return Err(format!(
-            "Plugin path is not a directory: {}",
-            path.display()
-        ));
-    }
-
-    let mut plugins = Vec::new();
-    let mut errors = Vec::new();
-
-    // Read directory entries
-    let entries =
-        fs::read_dir(path).map_err(|e| format!("Failed to read plugin directory: {}", e))?;
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                errors.push(format!("Failed to read directory entry: {}", e));
-                continue;
-            }
-        };
-
-        let file_path = entry.path();
-
-        // Skip non-files
-        if !file_path.is_file() {
-            continue;
-        }
-
-        // Only process .detector.toml files
-        if let Some(file_name) = file_path.file_name() {
-            let file_name_str = file_name.to_string_lossy();
-            if !file_name_str.ends_with(".detector.toml") {
-                continue;
-            }
-
-            // Attempt to load plugin
-            match load_plugin_from_file(&file_path) {
-                Ok(plugin) => {
-                    println!(
-                        "✓ Loaded plugin: {} ({})",
-                        plugin.config().name,
-                        file_name_str
-                    );
-                    plugins.push(plugin);
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to load {}: {}", file_name_str, e);
-                    eprintln!("✗ {}", error_msg);
-                    errors.push(error_msg);
-                }
-            }
-        }
-    }
-
-    // Report summary
-    if !errors.is_empty() {
-        eprintln!("\n⚠ Warning: {} plugin(s) failed to load", errors.len());
-    }
-
-    if plugins.is_empty() && errors.is_empty() {
-        return Err(format!(
-            "No plugin files found in directory: {} (looking for *.detector.toml)",
-            path.display()
-        ));
-    }
-
-    Ok(plugins)
+    Ok(load_plugins_with_diagnostics(plugin_dir)?.detectors)
 }
 
-/// Load a single plugin from a TOML file
-///
-/// # Arguments
-/// * `file_path` - Path to the `.detector.toml` file
-///
-/// # Returns
-/// * `Ok(PluginDetector)` - Successfully loaded plugin
-/// * `Err(String)` - Error message if file cannot be loaded or parsed
-pub fn load_plugin_from_file<P: AsRef<Path>>(file_path: P) -> Result<PluginDetector, String> {
+pub fn load_plugin_from_file<P: AsRef<Path>>(file_path: P) -> Result<PluginLoadReport, String> {
     let path = file_path.as_ref();
+    if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
+        return Err("plugin file must use a .toml suffix".to_string());
+    }
 
-    // Read file contents
-    let contents = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    // Parse TOML
-    let config: PluginConfig =
-        toml::from_str(&contents).map_err(|e| format!("Failed to parse TOML: {}", e))?;
-
-    // Create detector from config
-    PluginDetector::new(config)
+    let (detector, warning) = load_plugin_from_file_with_diagnostic(path)?;
+    let mut warnings: Vec<_> = warning.into_iter().collect();
+    if !has_canonical_suffix(path) {
+        warnings.push(
+            "legacy .toml plugin filename is deprecated; rename it with the .detector.toml suffix before v0.7"
+                .to_string(),
+        );
+    }
+    Ok(PluginLoadReport {
+        detectors: vec![detector],
+        warnings,
+    })
 }
 
-/// Discover plugin files in a directory
-///
-/// Returns paths to all `.detector.toml` files found.
+fn load_plugin_from_file_with_diagnostic(
+    path: &Path,
+) -> Result<(PluginDetector, Option<String>), String> {
+    let contents = crate::safe_io::read_utf8_regular_file(path, MAX_PLUGIN_BYTES)
+        .map_err(|error| format!("failed to read plugin file: {error}"))?;
+    let value: toml::Value =
+        toml::from_str(&contents).map_err(|error| format!("invalid TOML: {error}"))?;
+
+    let (config, warning) = if value.get("detector").is_some() {
+        (
+            parse_legacy(&contents)?,
+            Some("legacy [detector] schema is deprecated and will be removed in v0.7".to_string()),
+        )
+    } else {
+        let config: PluginConfig = toml::from_str(&contents)
+            .map_err(|error| format!("invalid detector schema: {error}"))?;
+        let warning = (!value
+            .as_table()
+            .is_some_and(|table| table.contains_key("schema_version")))
+        .then(|| {
+            "missing schema_version is accepted as version 1 in v0.6 and will be rejected in v0.7"
+                .to_string()
+        });
+        (config, warning)
+    };
+
+    PluginDetector::new(config).map(|detector| (detector, warning))
+}
+
 pub fn discover_plugin_files<P: AsRef<Path>>(plugin_dir: P) -> Result<Vec<PathBuf>, String> {
     let path = plugin_dir.as_ref();
-
     if !path.exists() {
         return Err(format!(
-            "Plugin directory does not exist: {}",
+            "plugin directory does not exist: {}",
+            path.display()
+        ));
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "plugin path is not a directory: {}",
             path.display()
         ));
     }
 
-    let entries =
-        fs::read_dir(path).map_err(|e| format!("Failed to read plugin directory: {}", e))?;
-
-    let mut plugin_files = Vec::new();
-
-    for entry in entries.flatten() {
-        let file_path = entry.path();
-        if file_path.is_file() {
-            if let Some(file_name) = file_path.file_name() {
-                let file_name_str = file_name.to_string_lossy();
-                if file_name_str.ends_with(".detector.toml") {
-                    plugin_files.push(file_path);
-                }
+    fs::read_dir(path)
+        .map_err(|error| format!("failed to read plugin directory: {error}"))?
+        .map(|entry| entry.map_err(|error| format!("failed to read directory entry: {error}")))
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let file = entry.path();
+                let is_plugin = entry.file_type().is_ok_and(|file_type| file_type.is_file())
+                    && file.extension().and_then(|extension| extension.to_str()) == Some("toml");
+                is_plugin.then_some(Ok(file))
             }
-        }
-    }
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
 
-    Ok(plugin_files)
+fn has_canonical_suffix(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(".detector.toml"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyPluginConfig {
+    detector: LegacyDetector,
+    #[serde(default)]
+    validation: LegacyValidation,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyDetector {
+    id: String,
+    name: String,
+    country: String,
+    pattern: String,
+    #[serde(default = "legacy_severity")]
+    severity: String,
+    #[serde(default = "legacy_confidence")]
+    confidence: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyValidation {
+    min_length: Option<usize>,
+    max_length: Option<usize>,
+    checksum: Option<String>,
+    allowed_chars: Option<String>,
+}
+
+fn legacy_severity() -> String {
+    "high".to_string()
+}
+
+fn legacy_confidence() -> String {
+    "medium".to_string()
+}
+
+fn parse_legacy(contents: &str) -> Result<PluginConfig, String> {
+    let legacy: LegacyPluginConfig = toml::from_str(contents)
+        .map_err(|error| format!("invalid legacy detector schema: {error}"))?;
+    Ok(PluginConfig {
+        schema_version: PLUGIN_SCHEMA_VERSION,
+        id: legacy.detector.id,
+        name: legacy.detector.name,
+        country: legacy.detector.country,
+        category: "custom".to_string(),
+        description: legacy.detector.description,
+        patterns: vec![PatternConfig {
+            pattern: legacy.detector.pattern,
+            confidence: legacy.detector.confidence,
+            description: None,
+        }],
+        severity: legacy.detector.severity,
+        examples: Vec::new(),
+        context_keywords: Vec::new(),
+        match_scope: MatchScope::Line,
+        validation: Some(ValidationConfig {
+            min_length: legacy.validation.min_length,
+            max_length: legacy.validation.max_length,
+            checksum: legacy.validation.checksum,
+            required_prefix: None,
+            required_suffix: None,
+            allowed_chars: legacy.validation.allowed_chars,
+            length_unit: LengthUnit::Bytes,
+        }),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::detector::Detector;
+    use crate::core::Detector;
     use std::io::Write;
     use tempfile::TempDir;
 
-    fn create_test_plugin_file(dir: &Path, name: &str, content: &str) -> PathBuf {
-        let file_path = dir.join(format!("{}.detector.toml", name));
-        let mut file = fs::File::create(&file_path).unwrap();
+    fn write_plugin(dir: &Path, name: &str, content: &str) -> PathBuf {
+        let path = dir.join(format!("{name}.detector.toml"));
+        let mut file = fs::File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
-        file_path
+        path
     }
 
     #[test]
-    fn test_load_valid_plugin() {
-        let temp_dir = TempDir::new().unwrap();
-
-        let config = r#"
-id = "test_id"
-name = "Test Detector"
+    fn loads_v1_and_legacy_plugins() {
+        let directory = TempDir::new().unwrap();
+        write_plugin(
+            directory.path(),
+            "modern",
+            r#"
+schema_version = 1
+id = "modern_id"
+name = "Modern"
 country = "universal"
-category = "custom"
-description = "A test detector"
-
 [[patterns]]
-pattern = "TEST-\\d{4}"
+pattern = "MOD-\\d{4}"
 confidence = "high"
+"#,
+        );
+        write_plugin(
+            directory.path(),
+            "legacy",
+            r#"
+[detector]
+id = "legacy_id"
+name = "Legacy"
+country = "us"
+pattern = "LEG-\\d{4}"
+"#,
+        );
+
+        let report = load_plugins_with_diagnostics(directory.path()).unwrap();
+        assert_eq!(report.detectors.len(), 2);
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report
+            .detectors
+            .iter()
+            .any(|detector| detector.id() == "modern_id"));
+    }
+
+    #[test]
+    fn discovers_legacy_toml_filename_with_warning() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("legacy-name.toml");
+        fs::write(
+            &path,
+            r#"
+schema_version = 1
+id = "legacy_filename"
+name = "Legacy filename"
+country = "universal"
+[[patterns]]
+pattern = "LEGACY"
+confidence = "high"
+"#,
+        )
+        .unwrap();
+
+        let report = load_plugins_with_diagnostics(directory.path()).unwrap();
+        assert_eq!(report.detectors.len(), 1);
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("legacy .toml plugin filename")));
+
+        let direct = load_plugin_from_file(&path).unwrap();
+        assert_eq!(direct.detectors.len(), 1);
+        assert_eq!(direct.warnings.len(), 1);
+    }
+
+    #[test]
+    fn rejects_duplicate_ids_and_malformed_files() {
+        let directory = TempDir::new().unwrap();
+        for name in ["first", "second"] {
+            write_plugin(
+                directory.path(),
+                name,
+                r#"
+schema_version = 1
+id = "duplicate_id"
+name = "Duplicate"
+country = "universal"
+[[patterns]]
+pattern = "DUP-\\d+"
+confidence = "medium"
+"#,
+            );
+        }
+        assert!(load_plugins_with_diagnostics(directory.path())
+            .unwrap_err()
+            .contains("duplicate detector id"));
+    }
+
+    #[test]
+    fn legacy_bridge_preserves_allowed_characters_line_scope_and_byte_lengths() {
+        let config = parse_legacy(
+            r#"
+[detector]
+id = "legacy_unicode"
+name = "Legacy Unicode"
+country = "xx"
+pattern = "^é$"
 
 [validation]
-min_length = 9
-max_length = 9
-        "#;
+min_length = 2
+max_length = 2
+allowed_chars = "é"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.match_scope, MatchScope::Line);
+        let validation = config.validation.as_ref().unwrap();
+        assert_eq!(validation.length_unit, LengthUnit::Bytes);
+        assert_eq!(validation.allowed_chars.as_deref(), Some("é"));
 
-        let file_path = create_test_plugin_file(temp_dir.path(), "test", config);
-
-        let result = load_plugin_from_file(&file_path);
-        assert!(result.is_ok());
-
-        let plugin = result.unwrap();
-        assert_eq!(plugin.id(), "test_id");
-        assert_eq!(plugin.name(), "Test Detector");
+        let detector = PluginDetector::new(config).unwrap();
+        let matches = detector.detect("é\r\né", Path::new("legacy.txt"));
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[1].location.start_byte, 4);
     }
 
     #[test]
-    fn test_load_invalid_toml() {
-        let temp_dir = TempDir::new().unwrap();
-        let file_path = create_test_plugin_file(temp_dir.path(), "invalid", "{ invalid toml");
+    fn legacy_bridge_preserves_checksum_semantics() {
+        for (checksum, valid, invalid) in [
+            ("luhn", "18", "17"),
+            ("mod11", "13", "12"),
+            ("mod97", "98", "97"),
+        ] {
+            let source = format!(
+                r#"
+[detector]
+id = "legacy_checksum"
+name = "Legacy checksum"
+country = "xx"
+pattern = "\\b\\d{{2}}\\b"
 
-        let result = load_plugin_from_file(&file_path);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to parse TOML"));
-    }
-
-    #[test]
-    fn test_load_plugins_from_directory() {
-        let temp_dir = TempDir::new().unwrap();
-
-        // Create multiple plugin files
-        let config1 = r#"
-id = "plugin1"
-name = "Plugin 1"
-country = "nl"
-category = "custom"
-description = "First plugin"
-
-[[patterns]]
-pattern = "P1-\\d{4}"
-confidence = "medium"
-        "#;
-
-        let config2 = r#"
-id = "plugin2"
-name = "Plugin 2"
-country = "gb"
-category = "custom"
-description = "Second plugin"
-
-[[patterns]]
-pattern = "P2-\\d{4}"
-confidence = "high"
-        "#;
-
-        create_test_plugin_file(temp_dir.path(), "plugin1", config1);
-        create_test_plugin_file(temp_dir.path(), "plugin2", config2);
-
-        // Create a non-plugin file (should be ignored)
-        let non_plugin_path = temp_dir.path().join("readme.txt");
-        fs::write(non_plugin_path, "This is not a plugin").unwrap();
-
-        let result = load_plugins_from_directory(temp_dir.path());
-        assert!(result.is_ok());
-
-        let plugins = result.unwrap();
-        assert_eq!(plugins.len(), 2);
-
-        // Check both plugins loaded
-        let ids: Vec<&str> = plugins.iter().map(|p| p.id()).collect();
-        assert!(ids.contains(&"plugin1"));
-        assert!(ids.contains(&"plugin2"));
-    }
-
-    #[test]
-    fn test_nonexistent_directory() {
-        let result = load_plugins_from_directory("/nonexistent/path/to/plugins");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not exist"));
-    }
-
-    #[test]
-    fn test_discover_plugin_files() {
-        let temp_dir = TempDir::new().unwrap();
-
-        create_test_plugin_file(temp_dir.path(), "detector1", "content");
-        create_test_plugin_file(temp_dir.path(), "detector2", "content");
-
-        // Create non-plugin file
-        fs::write(temp_dir.path().join("other.txt"), "content").unwrap();
-
-        let result = discover_plugin_files(temp_dir.path());
-        assert!(result.is_ok());
-
-        let files = result.unwrap();
-        assert_eq!(files.len(), 2);
-
-        for file in &files {
-            assert!(file.to_string_lossy().ends_with(".detector.toml"));
+[validation]
+checksum = "{checksum}"
+"#
+            );
+            let detector = PluginDetector::new(parse_legacy(&source).unwrap()).unwrap();
+            assert!(detector.validate(valid), "{checksum} should accept {valid}");
+            assert!(
+                !detector.validate(invalid),
+                "{checksum} should reject {invalid}"
+            );
         }
-    }
-
-    #[test]
-    fn test_empty_directory() {
-        let temp_dir = TempDir::new().unwrap();
-
-        let result = load_plugins_from_directory(temp_dir.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No plugin files found"));
     }
 }

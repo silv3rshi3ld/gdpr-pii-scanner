@@ -2,7 +2,8 @@
 ///
 /// The BSN is the Dutch social security number. It consists of 9 digits
 /// and uses the 11-proef (modulo-11) validation algorithm.
-use crate::core::{Confidence, Detector, GdprCategory, Match, Severity};
+use crate::core::detector::LimitedMatchCollector;
+use crate::core::{Confidence, DetectionOutcome, Detector, GdprCategory, Match, Severity};
 use crate::utils::{mask_value, validate_bsn_11_proef};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -47,11 +48,22 @@ impl Detector for BsnDetector {
     }
 
     fn detect(&self, text: &str, file_path: &Path) -> Vec<Match> {
-        let mut matches = Vec::new();
-        let mut byte_offset = 0;
+        self.detect_limited(text, file_path, Confidence::Low, usize::MAX)
+            .matches
+    }
+
+    fn detect_limited(
+        &self,
+        text: &str,
+        file_path: &Path,
+        minimum_confidence: Confidence,
+        limit: usize,
+    ) -> DetectionOutcome {
+        let mut matches = LimitedMatchCollector::new(minimum_confidence, limit);
+        let text_index = crate::core::types::TextIndex::new(text);
 
         // Split text into lines for accurate line/column reporting
-        for (line_num, line) in text.lines().enumerate() {
+        'scan: for (line_num, line) in text.lines().enumerate() {
             for capture in BSN_PATTERN.find_iter(line) {
                 let matched_text = capture.as_str();
 
@@ -73,32 +85,31 @@ impl Detector for BsnDetector {
                 };
 
                 // Only report high-confidence matches (strict mode)
-                if confidence == Confidence::High {
-                    matches.push(Match {
-                        detector_id: self.id().to_string(),
-                        detector_name: self.name().to_string(),
-                        country: self.country().to_string(),
-                        value_masked: mask_value(&digits),
-                        location: crate::core::types::Location {
-                            file_path: file_path.to_path_buf(),
-                            line: line_num + 1, // 1-indexed
-                            column: capture.start(),
-                            start_byte: byte_offset + capture.start(),
-                            end_byte: byte_offset + capture.end(),
-                        },
-                        confidence,
-                        severity: self.base_severity(),
-                        context: None, // Will be filled by context analyzer
-                        gdpr_category: GdprCategory::Regular,
-                    });
+                if confidence != Confidence::High {
+                    continue;
+                }
+                if !matches.push(Match {
+                    detector_id: self.id().to_string(),
+                    detector_name: self.name().to_string(),
+                    country: self.country().to_string(),
+                    value_masked: mask_value(&digits),
+                    location: text_index.location_from_line_column(
+                        file_path.to_path_buf(),
+                        line_num + 1,
+                        capture.start(),
+                        capture.end() - capture.start(),
+                    ),
+                    confidence,
+                    severity: self.base_severity(),
+                    context: None, // Will be filled by context analyzer
+                    gdpr_category: GdprCategory::Regular,
+                }) {
+                    break 'scan;
                 }
             }
-
-            // Update byte offset for next line (+1 for newline)
-            byte_offset += line.len() + 1;
         }
 
-        matches
+        matches.finish()
     }
 
     fn validate(&self, value: &str) -> bool {

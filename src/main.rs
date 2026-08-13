@@ -1,81 +1,147 @@
-/// PII-Radar CLI entry point
+//! `pii-radar` command-line entry point.
+
 use clap::Parser;
-use pii_radar::cli::{Cli, Commands, OutputFormat};
-use pii_radar::{
-    default_registry, registry_for_countries, scan_api_endpoints, ApiScanConfig, CsvReporter,
-    DocxExtractor, ExtractorRegistry, HtmlReporter, HttpMethod, JsonReporter, PdfExtractor,
-    ScanEngine, TerminalReporter, Walker, XlsxExtractor,
+use pii_radar::cli::{Cli, Commands, ConfidenceLevel, OutputFormat, OutputSchema, PluginCommands};
+use pii_radar::config::{CliOverrides, Config};
+use pii_radar::detectors::plugin_loader::{
+    load_plugin_from_file, load_plugins_with_diagnostics, PluginLoadReport,
 };
-use std::collections::HashMap;
+use pii_radar::{
+    default_registry, registry_for_countries, scan_api_endpoints, ApiScanConfig, Confidence,
+    CsvReporter, Detector, DetectorRegistry, DocxExtractor, ExtractionLimits, ExtractorRegistry,
+    HtmlReporter, HttpMethod, JsonReporter, PdfExtractor, ScanEngine, ScanResults, ScanStatus,
+    TerminalReporter, Walker, XlsxExtractor,
+};
+use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
+use url::Url;
 
-#[cfg(feature = "database")]
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+use pii_radar::database::scanner::extract_database_name;
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
 use pii_radar::database::{DatabaseConfig, DatabaseScanner, DatabaseType, ScanOptions};
 
-#[cfg(feature = "database")]
-#[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
-    match &cli.command {
-        Commands::ScanDb { .. } => {
-            if let Commands::ScanDb {
-                db_type,
-                connection,
-                database,
-                tables,
-                exclude_tables,
-                columns,
-                exclude_columns,
-                sample_percent,
-                row_limit,
-                pool_size,
-                format,
-                output,
-                countries,
-                no_progress,
-            } = cli.command
-            {
-                handle_scan_db(DbScanParams {
-                    db_type,
-                    connection,
-                    database,
-                    tables,
-                    exclude_tables,
-                    columns,
-                    exclude_columns,
-                    sample_percent,
-                    row_limit,
-                    pool_size,
-                    format,
-                    output,
-                    countries,
-                    no_progress,
-                })
-                .await;
-            }
+const EXIT_CLEAN: i32 = 0;
+const EXIT_FINDINGS: i32 = 1;
+const EXIT_INVALID: i32 = 2;
+const EXIT_INCOMPLETE: i32 = 3;
+const MIB: u64 = 1024 * 1024;
+const MAX_REQUEST_BODY_BYTES: u64 = 25 * MIB;
+
+#[derive(Debug)]
+struct AppError {
+    exit_code: i32,
+    message: String,
+}
+
+impl AppError {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: EXIT_INVALID,
+            message: message.into(),
         }
-        _ => {
-            handle_file_commands(cli.command);
+    }
+
+    fn operational(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: EXIT_INCOMPLETE,
+            message: message.into(),
         }
     }
 }
 
-#[cfg(not(feature = "database"))]
-fn main() {
-    let cli = Cli::parse();
-    handle_file_commands(cli.command);
+type AppResult<T> = Result<T, AppError>;
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+#[tokio::main]
+async fn main() {
+    finish(execute_with_database(Cli::parse()).await);
 }
 
-fn handle_file_commands(command: Commands) {
+#[cfg(not(any(feature = "postgres", feature = "mongodb")))]
+fn main() {
+    finish(execute_core(Cli::parse()));
+}
+
+fn finish(result: AppResult<i32>) {
+    match result {
+        Ok(exit_code) => {
+            if exit_code != EXIT_CLEAN {
+                process::exit(exit_code);
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {}", sanitize_diagnostic(&error.message));
+            process::exit(error.exit_code);
+        }
+    }
+}
+
+fn sanitize_diagnostic(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(output, "\\u{{{:x}}}", character as u32);
+            }
+            character => output.push(character),
+        }
+    }
+    output
+}
+
+#[cfg(not(any(feature = "postgres", feature = "mongodb")))]
+fn execute_core(cli: Cli) -> AppResult<i32> {
+    let Cli {
+        config,
+        no_config,
+        command,
+    } = cli;
+    let config = load_config(config.as_deref(), no_config)?;
+    run_local_command(command, config)
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+async fn execute_with_database(cli: Cli) -> AppResult<i32> {
+    let Cli {
+        config,
+        no_config,
+        command,
+    } = cli;
+    let config = load_config(config.as_deref(), no_config)?;
+
+    match command {
+        Commands::ScanDb { .. } => run_database_command(command, config).await,
+        command => run_local_command(command, config),
+    }
+}
+
+fn load_config(explicit: Option<&Path>, no_config: bool) -> AppResult<Config> {
+    let loaded = Config::load_resolved(explicit, no_config)
+        .map_err(|error| AppError::invalid(error.to_string()))?;
+    for warning in loaded.warnings {
+        eprintln!("warning: {}", sanitize_diagnostic(&warning));
+    }
+    Ok(loaded.config)
+}
+
+fn run_local_command(command: Commands, config: Config) -> AppResult<i32> {
     match command {
         Commands::Scan {
-            directory,
+            path,
             format,
             output,
             countries,
             min_confidence,
             no_context,
+            include_redacted_snippets,
             extract_documents,
             no_progress,
             full_paths,
@@ -83,494 +149,766 @@ fn handle_file_commands(command: Commands) {
             threads,
             max_filesize,
             plugins,
-        } => {
-            // Validate directory
-            if !directory.exists() {
-                eprintln!(
-                    "❌ Error: Directory does not exist: {}",
-                    directory.display()
-                );
-                process::exit(1);
-            }
-
-            if !directory.is_dir() {
-                eprintln!("❌ Error: Path is not a directory: {}", directory.display());
-                process::exit(1);
-            }
-
-            // Build registry (with optional country filtering)
-            let mut registry = if let Some(country_list) = countries {
-                let codes: Vec<String> = country_list
-                    .split(',')
-                    .map(|s| s.trim().to_lowercase())
-                    .collect();
-
-                println!("🌍 Filtering detectors for countries: {:?}", codes);
-                registry_for_countries(codes)
-            } else {
-                default_registry()
-            };
-
-            // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(pii_radar::default_plugins_dir);
-
-            if plugins_dir.exists() {
-                match pii_radar::load_plugins(&plugins_dir) {
-                    Ok(plugin_detectors) => {
-                        if !plugin_detectors.is_empty() {
-                            println!("🔌 Loaded {} plugin detector(s)\n", plugin_detectors.len());
-                            for detector in plugin_detectors {
-                                registry.register(detector);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Warning: Failed to load plugins: {}", e);
-                    }
-                }
-            }
-
-            println!("🔍 Using {} detectors\n", registry.all().len());
-
-            // Configure walker
-            let mut walker = Walker::new(&directory);
-
-            if let Some(depth) = max_depth {
-                walker = walker.max_depth(depth);
-            }
-
-            if let Some(t) = threads {
-                walker = walker.threads(t);
-            }
-
-            let _walker = walker.max_filesize(max_filesize * 1024 * 1024);
-
-            // Create engine
-            let mut engine = ScanEngine::new(registry)
-                .enable_context(!no_context)
-                .show_progress(!no_progress);
-
-            // Configure extractors if requested
-            if extract_documents {
-                let mut extractor_registry = ExtractorRegistry::new();
-                extractor_registry.register(Arc::new(PdfExtractor));
-                extractor_registry.register(Arc::new(DocxExtractor));
-                extractor_registry.register(Arc::new(XlsxExtractor));
-
-                println!("📄 Document extraction enabled (PDF, DOCX, XLSX)\n");
-                engine = engine.with_extractors(extractor_registry);
-            }
-
-            // Scan
-            let results = engine.scan_directory(&directory);
-
-            // Apply confidence filtering
-            let min_conf: pii_radar::Confidence = min_confidence.into();
-            let filtered_results = results.filter_by_confidence(min_conf);
-
-            // Output
-            match format {
-                OutputFormat::Terminal => {
-                    let reporter = TerminalReporter::new()
-                        .full_paths(full_paths)
-                        .show_context(!no_context);
-                    reporter.report(&filtered_results);
-                }
-                OutputFormat::Json | OutputFormat::JsonCompact => {
-                    let pretty = matches!(format, OutputFormat::Json);
-                    let reporter = JsonReporter::new().pretty(pretty);
-
-                    if let Some(path) = output {
-                        if let Err(e) = reporter.write_to_file(&filtered_results, &path) {
-                            eprintln!("❌ Error: {}", e);
-                            process::exit(1);
-                        }
-                        println!("✅ Results written to: {}", path.display());
-                    } else if let Err(e) = reporter.print(&filtered_results) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                }
-                OutputFormat::Html => {
-                    let reporter = HtmlReporter::new();
-
-                    let output_path =
-                        output.unwrap_or_else(|| std::path::PathBuf::from("pii-radar-report.html"));
-
-                    if let Err(e) = reporter.write_to_file(&filtered_results, &output_path) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                    println!("✅ HTML report written to: {}", output_path.display());
-                }
-                OutputFormat::Csv => {
-                    let reporter = CsvReporter::new().with_context(!no_context);
-
-                    if let Some(path) = output {
-                        if let Err(e) = reporter.write_to_file(&filtered_results, &path) {
-                            eprintln!("❌ Error: {}", e);
-                            process::exit(1);
-                        }
-                        println!("✅ CSV report written to: {}", path.display());
-                    } else if let Err(e) = reporter.print(&filtered_results) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                }
-            }
-
-            // Exit code 1 if PII found (for CI/CD)
-            if filtered_results.total_matches > 0 {
-                process::exit(1);
-            }
-        }
-
-        Commands::Detectors { verbose } => {
-            let registry = default_registry();
-
-            println!(
-                "\n📋 Available PII Detectors ({} total)\n",
-                registry.all().len()
-            );
-
-            for detector in registry.all() {
-                println!("🔍 {} ({})", detector.name(), detector.id());
-                println!(
-                    "   Country: {} | Severity: {:?}",
-                    detector.country().to_uppercase(),
-                    detector.base_severity()
-                );
-
-                if verbose {
-                    println!();
-                }
-            }
-
-            println!();
-        }
-
+            output_schema,
+            force,
+        } => run_file_scan(
+            path,
+            config,
+            FileScanCli {
+                format,
+                output,
+                countries,
+                min_confidence,
+                no_context,
+                include_redacted_snippets,
+                extract_documents,
+                no_progress,
+                full_paths,
+                max_depth,
+                threads,
+                max_filesize,
+                plugins,
+                output_schema,
+                force,
+            },
+        ),
         Commands::Api {
             urls,
             method,
             headers,
+            header_env,
             body,
+            body_file,
             timeout,
             no_redirects,
+            max_response_bytes,
+            max_matches,
             format,
             output,
             min_confidence,
             plugins,
-        } => {
-            // Parse HTTP method
-            let http_method = match method.parse::<HttpMethod>() {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("❌ Error: {}", e);
-                    process::exit(1);
-                }
-            };
-
-            // Parse headers
-            let mut header_map = HashMap::new();
-            for header in headers {
-                if let Some((key, value)) = header.split_once(':') {
-                    header_map.insert(key.trim().to_string(), value.trim().to_string());
-                } else {
-                    eprintln!(
-                        "❌ Error: Invalid header format: {}. Expected KEY:VALUE",
-                        header
-                    );
-                    process::exit(1);
-                }
-            }
-
-            // Build API scan config
-            let api_config = ApiScanConfig {
-                method: http_method,
-                headers: header_map,
+            output_schema,
+            force,
+        } => run_api_scan(
+            config,
+            ApiCli {
+                urls,
+                method,
+                headers,
+                header_env,
                 body,
-                timeout_secs: timeout,
-                follow_redirects: !no_redirects,
-                max_redirects: 10,
-            };
-
-            // Build registry
-            let mut registry = default_registry();
-
-            // Load plugin detectors
-            let plugins_dir = plugins.unwrap_or_else(pii_radar::default_plugins_dir);
-
-            if plugins_dir.exists() {
-                match pii_radar::load_plugins(&plugins_dir) {
-                    Ok(plugin_detectors) => {
-                        if !plugin_detectors.is_empty() {
-                            println!("🔌 Loaded {} plugin detector(s)\n", plugin_detectors.len());
-                            for detector in plugin_detectors {
-                                registry.register(detector);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Warning: Failed to load plugins: {}", e);
-                    }
-                }
-            }
-
-            println!("🔍 Using {} detectors\n", registry.all().len());
-            println!("🌐 Scanning {} API endpoint(s)...\n", urls.len());
-
-            // Prepare endpoints
-            let endpoints: Vec<(String, ApiScanConfig)> = urls
-                .into_iter()
-                .map(|url| (url, api_config.clone()))
-                .collect();
-
-            // Scan endpoints
-            let min_conf: pii_radar::Confidence = min_confidence.into();
-            let detectors = registry.all();
-
-            let results = match scan_api_endpoints(&endpoints, detectors, &min_conf) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("❌ Error: {}", e);
-                    process::exit(1);
-                }
-            };
-
-            // Output
-            match format {
-                OutputFormat::Terminal => {
-                    let reporter = TerminalReporter::new().full_paths(true).show_context(true);
-                    reporter.report(&results);
-                }
-                OutputFormat::Json | OutputFormat::JsonCompact => {
-                    let pretty = matches!(format, OutputFormat::Json);
-                    let reporter = JsonReporter::new().pretty(pretty);
-
-                    if let Some(path) = output {
-                        if let Err(e) = reporter.write_to_file(&results, &path) {
-                            eprintln!("❌ Error: {}", e);
-                            process::exit(1);
-                        }
-                        println!("✅ Results written to: {}", path.display());
-                    } else if let Err(e) = reporter.print(&results) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                }
-                OutputFormat::Html => {
-                    let reporter = HtmlReporter::new();
-
-                    let output_path = output
-                        .unwrap_or_else(|| std::path::PathBuf::from("pii-radar-api-report.html"));
-
-                    if let Err(e) = reporter.write_to_file(&results, &output_path) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                    println!("✅ HTML report written to: {}", output_path.display());
-                }
-                OutputFormat::Csv => {
-                    let reporter = CsvReporter::new().with_context(true);
-
-                    if let Some(path) = output {
-                        if let Err(e) = reporter.write_to_file(&results, &path) {
-                            eprintln!("❌ Error: {}", e);
-                            process::exit(1);
-                        }
-                        println!("✅ CSV report written to: {}", path.display());
-                    } else if let Err(e) = reporter.print(&results) {
-                        eprintln!("❌ Error: {}", e);
-                        process::exit(1);
-                    }
-                }
-            }
-
-            // Exit code 1 if PII found (for CI/CD)
-            if results.total_matches > 0 {
-                process::exit(1);
-            }
+                body_file,
+                timeout,
+                no_redirects,
+                max_response_bytes,
+                max_matches,
+                format,
+                output,
+                min_confidence,
+                plugins,
+                output_schema,
+                force,
+            },
+        ),
+        Commands::Detectors { verbose } => {
+            print_detectors(verbose);
+            Ok(EXIT_CLEAN)
         }
-
-        #[cfg(feature = "database")]
-        Commands::ScanDb { .. } => {
-            // This should be handled in the async main function
-            unreachable!("ScanDb should be handled in async main");
-        }
+        Commands::Plugins { command } => validate_plugins(command),
+        #[cfg(any(feature = "postgres", feature = "mongodb"))]
+        Commands::ScanDb { .. } => unreachable!("database command is dispatched asynchronously"),
     }
 }
 
-#[cfg(feature = "database")]
-struct DbScanParams {
-    db_type: String,
-    connection: String,
-    database: Option<String>,
-    tables: Option<String>,
-    exclude_tables: Option<String>,
-    columns: Option<String>,
-    exclude_columns: Option<String>,
-    sample_percent: Option<u8>,
-    row_limit: Option<usize>,
-    pool_size: u32,
-    format: OutputFormat,
-    output: Option<std::path::PathBuf>,
+struct FileScanCli {
+    format: Option<OutputFormat>,
+    output: Option<PathBuf>,
     countries: Option<String>,
+    min_confidence: Option<ConfidenceLevel>,
+    no_context: bool,
+    include_redacted_snippets: bool,
+    extract_documents: bool,
     no_progress: bool,
+    full_paths: bool,
+    max_depth: Option<usize>,
+    threads: Option<usize>,
+    max_filesize: Option<u64>,
+    plugins: Option<PathBuf>,
+    output_schema: OutputSchema,
+    force: bool,
 }
 
-#[cfg(feature = "database")]
-async fn handle_scan_db(params: DbScanParams) {
-    use std::str::FromStr;
+fn run_file_scan(path: PathBuf, config: Config, cli: FileScanCli) -> AppResult<i32> {
+    let explicit_plugins = cli.plugins.clone();
+    let config = config.merge_with_cli(CliOverrides {
+        countries: cli.countries,
+        min_confidence: cli
+            .min_confidence
+            .map(|confidence| confidence.config_name().to_string()),
+        extract_documents: cli.extract_documents,
+        no_context: cli.no_context,
+        include_redacted_snippets: cli.include_redacted_snippets,
+        threads: cli.threads,
+        format: cli.format.map(|format| format.config_name().to_string()),
+        output: cli.output,
+        no_progress: cli.no_progress,
+        full_paths: cli.full_paths,
+        max_filesize: cli.max_filesize,
+        max_depth: cli.max_depth,
+    });
+    config
+        .validate()
+        .map_err(|error| AppError::invalid(error.to_string()))?;
 
-    // Parse database type
-    let db_type = match DatabaseType::from_str(&params.db_type) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("❌ Error: {}", e);
-            eprintln!("Supported types: postgres, mongodb, sqlite");
-            process::exit(1);
+    let format = parse_output_format(&config.output.format)?;
+    let minimum = parse_confidence(&config.scan.min_confidence)?;
+    let registry = build_registry(&config, explicit_plugins.as_deref())?;
+
+    let max_file_bytes = mib_to_bytes(config.filters.max_filesize_mb, "max_filesize_mb")?;
+    let max_total_bytes = mib_to_bytes(config.filters.max_total_size_mb, "max_total_size_mb")?;
+    let max_extracted_bytes = mib_to_bytes(
+        config.filters.max_extracted_size_mb,
+        "max_extracted_size_mb",
+    )?;
+    let max_extracted_bytes = usize::try_from(max_extracted_bytes)
+        .map_err(|_| AppError::invalid("limits.max_extracted_size_mb is too large"))?;
+
+    let mut walker = Walker::new(&path)
+        .max_filesize(max_file_bytes)
+        .max_files(config.filters.max_files)
+        .max_total_size(max_total_bytes);
+    if let Some(depth) = config.filters.max_depth {
+        walker = walker.max_depth(depth);
+    }
+    if let Some(threads) = config.scan.max_threads {
+        walker = walker.threads(threads);
+    }
+
+    let extraction_limits = ExtractionLimits {
+        max_input_bytes: max_file_bytes,
+        max_output_bytes: max_extracted_bytes,
+        ..ExtractionLimits::default()
+    };
+
+    let progress = !config.output.no_progress && std::io::stderr().is_terminal();
+    let mut engine = ScanEngine::new(registry)
+        .with_walker(walker)
+        .with_extraction_limits(extraction_limits)
+        .minimum_confidence(minimum)
+        .max_matches_per_file(config.filters.max_matches_per_source)
+        .max_matches_per_scan(config.filters.max_matches)
+        .enable_context(!config.scan.no_context)
+        .include_redacted_snippets(config.scan.include_redacted_snippets)
+        .show_progress(progress);
+
+    if config.scan.extract_documents {
+        let mut extractors = ExtractorRegistry::new();
+        extractors.register(Arc::new(PdfExtractor));
+        extractors.register(Arc::new(DocxExtractor));
+        extractors.register(Arc::new(XlsxExtractor));
+        engine = engine.with_extractors(extractors);
+    }
+
+    let results = engine.scan_directory(&path);
+    emit_results(
+        &results,
+        format,
+        config.output.output_path.as_deref(),
+        cli.output_schema,
+        cli.force,
+        config.output.full_paths,
+        config.scan.include_redacted_snippets,
+    )?;
+    Ok(scan_exit_code(&results))
+}
+
+struct ApiCli {
+    urls: Vec<String>,
+    method: String,
+    headers: Vec<String>,
+    header_env: Vec<String>,
+    body: Option<String>,
+    body_file: Option<PathBuf>,
+    timeout: u64,
+    no_redirects: bool,
+    max_response_bytes: Option<usize>,
+    max_matches: Option<usize>,
+    format: Option<OutputFormat>,
+    output: Option<PathBuf>,
+    min_confidence: Option<ConfidenceLevel>,
+    plugins: Option<PathBuf>,
+    output_schema: OutputSchema,
+    force: bool,
+}
+
+fn run_api_scan(config: Config, cli: ApiCli) -> AppResult<i32> {
+    if cli.timeout == 0 {
+        return Err(AppError::invalid("--timeout must be greater than zero"));
+    }
+    if cli.max_response_bytes == Some(0) {
+        return Err(AppError::invalid(
+            "--max-response-bytes must be greater than zero",
+        ));
+    }
+    if cli.max_matches == Some(0) {
+        return Err(AppError::invalid("--max-matches must be greater than zero"));
+    }
+    for endpoint in &cli.urls {
+        validate_endpoint_input(endpoint)?;
+    }
+
+    let explicit_plugins = cli.plugins.clone();
+    let config = config.merge_with_cli(CliOverrides {
+        min_confidence: cli
+            .min_confidence
+            .map(|confidence| confidence.config_name().to_string()),
+        format: cli.format.map(|format| format.config_name().to_string()),
+        output: cli.output,
+        ..CliOverrides::default()
+    });
+    config
+        .validate()
+        .map_err(|error| AppError::invalid(error.to_string()))?;
+
+    let method = cli
+        .method
+        .parse::<HttpMethod>()
+        .map_err(|error| AppError::invalid(error.to_string()))?;
+    let headers = resolve_headers(cli.headers, cli.header_env)?;
+    let body = match (cli.body, cli.body_file) {
+        (Some(body), None) => Some(body),
+        (None, Some(path)) => Some(read_utf8_regular_file(&path, MAX_REQUEST_BODY_BYTES)?),
+        (None, None) => None,
+        (Some(_), Some(_)) => {
+            return Err(AppError::invalid(
+                "--body and --body-file cannot be used together",
+            ));
         }
     };
 
-    // Extract or validate database name
-    let db_name = if let Some(name) = params.database {
-        name
-    } else {
-        match pii_radar::database::scanner::extract_database_name(&params.connection, db_type) {
-            Some(name) => name,
-            None => {
-                eprintln!("❌ Error: Database name required (use --database or include in connection string)");
-                process::exit(1);
-            }
-        }
+    let defaults = ApiScanConfig::default();
+    let api_config = ApiScanConfig {
+        method,
+        headers,
+        body,
+        timeout_secs: cli.timeout,
+        follow_redirects: !cli.no_redirects,
+        max_redirects: defaults.max_redirects,
+        max_response_bytes: cli
+            .max_response_bytes
+            .unwrap_or(defaults.max_response_bytes),
+        max_matches: cli
+            .max_matches
+            .unwrap_or(config.filters.max_matches_per_source),
     };
 
-    println!("🔗 Connecting to {} database: {}", db_type, db_name);
+    let registry = build_registry(&config, explicit_plugins.as_deref())?;
+    let minimum = parse_confidence(&config.scan.min_confidence)?;
+    let endpoints: Vec<_> = cli
+        .urls
+        .into_iter()
+        .map(|url| (url, api_config.clone()))
+        .collect();
+    let results = scan_api_endpoints(&endpoints, registry.all(), &minimum)
+        .map_err(|error| AppError::operational(error.to_string()))?;
 
-    // Build registry
-    let registry = if let Some(country_list) = params.countries {
-        let codes: Vec<String> = country_list
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
-            .collect();
-        println!("🌍 Filtering detectors for countries: {:?}", codes);
-        registry_for_countries(codes)
-    } else {
+    emit_results(
+        &results,
+        parse_output_format(&config.output.format)?,
+        config.output.output_path.as_deref(),
+        cli.output_schema,
+        cli.force,
+        true,
+        false,
+    )?;
+    Ok(scan_exit_code(&results))
+}
+
+fn validate_endpoint_input(endpoint: &str) -> AppResult<()> {
+    let parsed = Url::parse(endpoint).map_err(|_| AppError::invalid("invalid endpoint URL"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::invalid("endpoint URL must use HTTP or HTTPS"));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(AppError::invalid("endpoint URL must not contain userinfo"));
+    }
+    Ok(())
+}
+
+fn resolve_headers(
+    literal: Vec<String>,
+    from_environment: Vec<String>,
+) -> AppResult<HashMap<String, String>> {
+    let mut headers = HashMap::new();
+    let mut normalized_names = HashSet::new();
+
+    for header in literal {
+        let (name, value) = header.split_once(':').ok_or_else(|| {
+            AppError::invalid(format!("invalid header '{header}'; expected NAME:VALUE"))
+        })?;
+        insert_header(&mut headers, &mut normalized_names, name, value)?;
+    }
+    for specification in from_environment {
+        let (name, variable) = specification.split_once('=').ok_or_else(|| {
+            AppError::invalid(format!(
+                "invalid --header-env '{specification}'; expected NAME=ENV_VAR"
+            ))
+        })?;
+        if variable.trim().is_empty() {
+            return Err(AppError::invalid(
+                "header environment variable name is empty",
+            ));
+        }
+        let value = std::env::var(variable.trim()).map_err(|_| {
+            AppError::invalid(format!(
+                "environment variable '{}' is missing or not valid Unicode",
+                variable.trim()
+            ))
+        })?;
+        insert_header(&mut headers, &mut normalized_names, name, &value)?;
+    }
+
+    Ok(headers)
+}
+
+fn insert_header(
+    headers: &mut HashMap<String, String>,
+    normalized_names: &mut HashSet<String>,
+    name: &str,
+    value: &str,
+) -> AppResult<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::invalid("HTTP header name is empty"));
+    }
+    if !normalized_names.insert(name.to_ascii_lowercase()) {
+        return Err(AppError::invalid(format!(
+            "HTTP header '{name}' was supplied more than once"
+        )));
+    }
+    headers.insert(name.to_string(), value.trim().to_string());
+    Ok(())
+}
+
+fn read_utf8_regular_file(path: &Path, maximum: u64) -> AppResult<String> {
+    pii_radar::safe_io::read_utf8_regular_file(path, maximum).map_err(|error| match error {
+        pii_radar::safe_io::SafeFileError::NotRegular => AppError::invalid(format!(
+            "refusing to read symlink or non-regular request body: {}",
+            path.display()
+        )),
+        pii_radar::safe_io::SafeFileError::TooLarge { .. } => {
+            AppError::invalid(format!("request body exceeds {maximum} bytes"))
+        }
+        pii_radar::safe_io::SafeFileError::InvalidUtf8(_) => {
+            AppError::invalid("request body is not valid UTF-8")
+        }
+        pii_radar::safe_io::SafeFileError::Io(error) => AppError::invalid(format!(
+            "failed to read request body {}: {error}",
+            path.display()
+        )),
+    })
+}
+
+fn build_registry(config: &Config, explicit_plugins: Option<&Path>) -> AppResult<DetectorRegistry> {
+    let mut registry = if config.scan.countries.is_empty() {
         default_registry()
+    } else {
+        registry_for_countries(config.scan.countries.clone())
     };
+    let mut known_ids: HashSet<String> = registry.list_ids().into_iter().collect();
 
-    println!("🔍 Using {} detectors\n", registry.all().len());
-
-    // Build scan options
-    let mut scan_options = ScanOptions::new();
-    scan_options.show_progress = !params.no_progress;
-
-    if let Some(t) = params.tables {
-        scan_options.include_tables = Some(t.split(',').map(|s| s.trim().to_string()).collect());
-    }
-
-    if let Some(e) = params.exclude_tables {
-        scan_options.exclude_tables = e.split(',').map(|s| s.trim().to_string()).collect();
-    }
-
-    if let Some(c) = params.columns {
-        scan_options.include_columns = Some(c.split(',').map(|s| s.trim().to_string()).collect());
-    }
-
-    if let Some(e) = params.exclude_columns {
-        scan_options.exclude_columns = e.split(',').map(|s| s.trim().to_string()).collect();
-    }
-
-    scan_options.sample_percent = params.sample_percent;
-    scan_options.row_limit = params.row_limit;
-
-    // Build database config
-    let config = DatabaseConfig::new(db_type, params.connection).with_pool_size(params.pool_size);
-
-    // Create scanner
-    let scanner = match DatabaseScanner::new(config, Some(&db_name), registry).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("❌ Error connecting to database: {}", e);
-            process::exit(1);
+    let (directories, strict_missing) = if let Some(directory) = explicit_plugins {
+        (vec![directory.to_path_buf()], true)
+    } else {
+        match &config.plugins {
+            Some(plugins) if plugins.enabled => (plugins.directories.clone(), false),
+            _ => (Vec::new(), false),
         }
     };
 
-    println!("✅ Connected successfully\n");
-
-    // Scan database
-    println!("🔍 Scanning database...\n");
-    let results = match scanner.scan(&db_name, &scan_options).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("❌ Error scanning database: {}", e);
-            process::exit(1);
+    for directory in directories {
+        if !directory.exists() && !strict_missing {
+            continue;
         }
-    };
+        if explicit_plugins.is_none() && is_legacy_plugin_directory(&directory) {
+            let warning = format!(
+                "legacy plugin directory {} is deprecated; configure the platform plugin directory before v0.7",
+                directory.display()
+            );
+            eprintln!("warning: {}", sanitize_diagnostic(&warning));
+        }
+        let report = load_plugins_with_diagnostics(&directory)
+            .map_err(|error| AppError::invalid(error.to_string()))?;
+        register_plugin_report(&mut registry, &mut known_ids, report, &directory)?;
+    }
+    Ok(registry)
+}
 
-    // Print summary
-    println!("\n📊 Scan Summary:");
-    println!(
-        "   Database: {} ({})",
-        results.database_name, results.database_type
-    );
-    println!("   Tables/Collections: {}", results.tables_scanned.len());
-    println!("   Total Rows: {}", results.total_rows);
-    println!("   Total Matches: {}", results.total_matches);
-    println!("   Duration: {:.2}s", results.duration.as_secs_f64());
+fn is_legacy_plugin_directory(path: &Path) -> bool {
+    path == Path::new("plugins")
+        || path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == ".pii-radar")
+}
 
-    // Output detailed results based on format
-    match params.format {
-        OutputFormat::Terminal => {
-            println!("\n📋 Detailed Results:");
-            for table in &results.tables_scanned {
-                if table.matches_found > 0 {
-                    println!(
-                        "\n🗂️  {} ({} matches in {} rows):",
-                        table.name, table.matches_found, table.rows_scanned
-                    );
-                    for m in &table.matches {
-                        println!(
-                            "   ⚠️  {} - {} (Line: {}, Column: {})",
-                            m.detector_name,
-                            m.value_masked,
-                            m.location.line,
-                            m.location.file_path.display()
-                        );
-                    }
-                }
+fn register_plugin_report(
+    registry: &mut DetectorRegistry,
+    known_ids: &mut HashSet<String>,
+    report: PluginLoadReport,
+    source: &Path,
+) -> AppResult<()> {
+    for warning in report.warnings {
+        eprintln!("warning: {}", sanitize_diagnostic(&warning));
+    }
+    for detector in report.detectors {
+        if !known_ids.insert(detector.id().to_string()) {
+            return Err(AppError::invalid(format!(
+                "{}: detector id '{}' conflicts with another detector",
+                source.display(),
+                detector.id()
+            )));
+        }
+        registry.register(Box::new(detector));
+    }
+    Ok(())
+}
+
+fn validate_plugins(command: PluginCommands) -> AppResult<i32> {
+    match command {
+        PluginCommands::Validate { path } => {
+            let report = if path.is_dir() {
+                load_plugins_with_diagnostics(&path)
+            } else {
+                load_plugin_from_file(&path)
             }
+            .map_err(AppError::invalid)?;
+            for warning in &report.warnings {
+                eprintln!("warning: {}", sanitize_diagnostic(warning));
+            }
+            println!("validated {} detector plugin(s)", report.detectors.len());
+            Ok(EXIT_CLEAN)
+        }
+    }
+}
+
+fn print_detectors(verbose: bool) {
+    let registry = default_registry();
+    println!("Built-in detectors ({})", registry.all().len());
+    for detector in registry.all() {
+        if verbose {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                detector.id(),
+                detector.country(),
+                detector.base_severity(),
+                detector.name(),
+                detector.description().unwrap_or_default()
+            );
+        } else {
+            println!("{}\t{}", detector.id(), detector.name());
+        }
+    }
+}
+
+fn emit_results(
+    results: &ScanResults,
+    format: OutputFormat,
+    output: Option<&Path>,
+    schema: OutputSchema,
+    force: bool,
+    full_paths: bool,
+    show_context: bool,
+) -> AppResult<()> {
+    let legacy = matches!(schema, OutputSchema::Legacy);
+    if legacy
+        && !matches!(
+            format,
+            OutputFormat::Json | OutputFormat::JsonCompact | OutputFormat::Csv
+        )
+    {
+        return Err(AppError::invalid(
+            "--output-schema legacy is supported only for JSON and CSV",
+        ));
+    }
+    if !matches!(format, OutputFormat::Terminal) {
+        if results.error_count > 0 {
+            eprintln!(
+                "warning: scan incomplete: {} source error(s); details are in the report",
+                results.error_count
+            );
+        }
+        if results.truncated_files > 0 {
+            eprintln!(
+                "warning: scan incomplete: {} source(s) were truncated",
+                results.truncated_files
+            );
+        }
+    }
+    match format {
+        OutputFormat::Terminal => {
+            if output.is_some() {
+                return Err(AppError::invalid(
+                    "terminal output cannot be combined with --output",
+                ));
+            }
+            TerminalReporter::new()
+                .full_paths(full_paths)
+                .show_context(show_context)
+                .report(results);
         }
         OutputFormat::Json | OutputFormat::JsonCompact => {
-            let pretty = matches!(params.format, OutputFormat::Json);
-            let json_str = if pretty {
-                serde_json::to_string_pretty(&results).unwrap()
+            let reporter = JsonReporter::new()
+                .pretty(matches!(format, OutputFormat::Json))
+                .legacy(legacy)
+                .overwrite(force);
+            if let Some(path) = output {
+                reporter
+                    .write_to_file(results, path)
+                    .map_err(AppError::operational)?;
+                eprintln!(
+                    "report written to {}",
+                    sanitize_diagnostic(&path.display().to_string())
+                );
             } else {
-                serde_json::to_string(&results).unwrap()
-            };
-
-            if let Some(path) = params.output {
-                if let Err(e) = std::fs::write(&path, json_str) {
-                    eprintln!("❌ Error writing to file: {}", e);
-                    process::exit(1);
-                }
-                println!("\n✅ Results written to: {}", path.display());
+                reporter.print(results).map_err(AppError::operational)?;
+            }
+        }
+        OutputFormat::Csv => {
+            let reporter = CsvReporter::new()
+                .with_context(show_context)
+                .legacy(legacy)
+                .overwrite(force);
+            if let Some(path) = output {
+                reporter
+                    .write_to_file(results, path)
+                    .map_err(AppError::operational)?;
+                eprintln!(
+                    "report written to {}",
+                    sanitize_diagnostic(&path.display().to_string())
+                );
             } else {
-                println!("\n{}", json_str);
+                reporter.print(results).map_err(AppError::operational)?;
             }
         }
         OutputFormat::Html => {
-            eprintln!("❌ HTML output format not yet implemented for database scans");
-            process::exit(1);
-        }
-        OutputFormat::Csv => {
-            eprintln!("❌ CSV output format not yet implemented for database scans");
-            process::exit(1);
+            let path = output.ok_or_else(|| {
+                AppError::invalid("HTML output requires --output PATH or output.output_path")
+            })?;
+            HtmlReporter::new()
+                .overwrite(force)
+                .write_to_file(results, path)
+                .map_err(|error| {
+                    AppError::operational(format!("failed to write {}: {error}", path.display()))
+                })?;
+            eprintln!(
+                "report written to {}",
+                sanitize_diagnostic(&path.display().to_string())
+            );
         }
     }
+    Ok(())
+}
 
-    // Exit code 1 if PII found (for CI/CD)
-    if results.total_matches > 0 {
-        process::exit(1);
+fn parse_output_format(value: &str) -> AppResult<OutputFormat> {
+    OutputFormat::parse_config(value).map_err(AppError::invalid)
+}
+
+fn parse_confidence(value: &str) -> AppResult<Confidence> {
+    ConfidenceLevel::parse_config(value)
+        .map(Into::into)
+        .map_err(AppError::invalid)
+}
+
+fn mib_to_bytes(value: u64, field: &str) -> AppResult<u64> {
+    value
+        .checked_mul(MIB)
+        .ok_or_else(|| AppError::invalid(format!("limits.{field} is too large")))
+}
+
+fn scan_exit_code(results: &ScanResults) -> i32 {
+    if results.status != ScanStatus::Complete
+        || results.error_count > 0
+        || results.extraction_failures > 0
+        || results.truncated_files > 0
+    {
+        EXIT_INCOMPLETE
+    } else if results.total_matches > 0 {
+        EXIT_FINDINGS
+    } else {
+        EXIT_CLEAN
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+async fn run_database_command(command: Commands, config: Config) -> AppResult<i32> {
+    let Commands::ScanDb {
+        db_type,
+        connection,
+        connection_env,
+        database,
+        tables,
+        exclude_tables,
+        columns,
+        exclude_columns,
+        sample_percent,
+        row_limit,
+        pool_size,
+        format,
+        output,
+        countries,
+        no_progress,
+        output_schema,
+        force,
+    } = command
+    else {
+        unreachable!("only scan-db reaches the database dispatcher")
+    };
+
+    let config = config.merge_with_cli(CliOverrides {
+        countries,
+        format: format.map(|format| format.config_name().to_string()),
+        output,
+        no_progress,
+        ..CliOverrides::default()
+    });
+    config
+        .validate()
+        .map_err(|error| AppError::invalid(error.to_string()))?;
+
+    let database_type = db_type.parse::<DatabaseType>().map_err(AppError::invalid)?;
+    ensure_connector_is_available(database_type)?;
+    let connection = match (connection, connection_env) {
+        (Some(connection), None) => connection,
+        (None, Some(variable)) => std::env::var(&variable).map_err(|_| {
+            AppError::invalid(format!(
+                "environment variable '{variable}' is missing or not valid Unicode"
+            ))
+        })?,
+        _ => {
+            return Err(AppError::invalid(
+                "supply exactly one of --connection or --connection-env",
+            ));
+        }
+    };
+
+    let database_name = database
+        .or_else(|| extract_database_name(&connection, database_type))
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| {
+            AppError::invalid("database name is required; use --database or include it in the URL")
+        })?;
+    let registry = build_registry(&config, None)?;
+
+    let mut options = ScanOptions::new();
+    options.include_tables = tables.map(|value| split_names(&value));
+    options.exclude_tables = exclude_tables.map_or_else(Vec::new, |value| split_names(&value));
+    options.include_columns = columns.map(|value| split_names(&value));
+    options.exclude_columns = exclude_columns.map_or_else(Vec::new, |value| split_names(&value));
+    options.sample_percent = sample_percent;
+    options.row_limit = row_limit;
+    options.show_progress = !config.output.no_progress && std::io::stderr().is_terminal();
+    options.minimum_confidence = parse_confidence(&config.scan.min_confidence)?;
+    options.max_matches_per_table = config.filters.max_matches_per_source;
+    options.max_matches_total = config.filters.max_matches;
+    options
+        .validate()
+        .map_err(|error| AppError::invalid(error.to_string()))?;
+
+    let database_config = DatabaseConfig::new(database_type, connection).with_pool_size(pool_size);
+    let scanner = DatabaseScanner::new(database_config, Some(&database_name), registry)
+        .await
+        .map_err(|error| AppError::operational(error.to_string()))?;
+    let results = scanner
+        .scan(&database_name, &options)
+        .await
+        .map_err(|error| AppError::operational(error.to_string()))?
+        .into_scan_results()
+        .map_err(|error| AppError::operational(error.to_string()))?;
+
+    emit_results(
+        &results,
+        parse_output_format(&config.output.format)?,
+        config.output.output_path.as_deref(),
+        output_schema,
+        force,
+        true,
+        false,
+    )?;
+    Ok(scan_exit_code(&results))
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+fn split_names(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+#[cfg(any(feature = "postgres", feature = "mongodb"))]
+fn ensure_connector_is_available(database_type: DatabaseType) -> AppResult<()> {
+    match database_type {
+        DatabaseType::PostgreSQL if !cfg!(feature = "postgres") => Err(AppError::invalid(
+            "PostgreSQL support is not enabled in this build",
+        )),
+        DatabaseType::MongoDB if !cfg!(feature = "mongodb") => Err(AppError::invalid(
+            "MongoDB support is not enabled in this build",
+        )),
+        #[allow(deprecated)]
+        DatabaseType::SQLite => Err(AppError::invalid("SQLite scanning is not supported")),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_status_takes_precedence_over_findings() {
+        let mut results = ScanResults::new();
+        results.total_matches = 1;
+        results.status = ScanStatus::Partial;
+        assert_eq!(scan_exit_code(&results), EXIT_INCOMPLETE);
+    }
+
+    #[test]
+    fn diagnostics_escape_terminal_controls_and_line_breaks() {
+        assert_eq!(
+            sanitize_diagnostic("path\n\x1b[31mprivate\tvalue\r"),
+            "path\\n\\u{1b}[31mprivate\\tvalue\\r"
+        );
+    }
+
+    #[test]
+    fn headers_are_case_insensitively_unique() {
+        let error = resolve_headers(
+            vec![
+                "Authorization:first".to_string(),
+                "authorization:second".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.exit_code, EXIT_INVALID);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_body_file_rejects_a_direct_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("body.txt");
+        let alias = directory.path().join("body-link.txt");
+        std::fs::write(&target, "private body").unwrap();
+        symlink(&target, &alias).unwrap();
+
+        let error = read_utf8_regular_file(&alias, 1024).unwrap_err();
+        assert_eq!(error.exit_code, EXIT_INVALID);
+        assert!(error.message.contains("refusing to read symlink"));
     }
 }

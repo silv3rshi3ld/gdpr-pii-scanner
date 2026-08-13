@@ -1,344 +1,163 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Notable changes are recorded here. Dates use `YYYY-MM-DD`.
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-08-13
+
+### Added
+
+- The `scan` command accepts either one file or a directory.
+- Global `--config PATH` and `--no-config` options make configuration layering explicit.
+- `--include-redacted-snippets` adds opt-in, redacted context to file-scan reports.
+- API scanning accepts headers through `--header-env`, request bodies through `--body-file`, a response-size limit through `--max-response-bytes`, and a per-endpoint finding limit through `--max-matches`.
+- Database scanning can read a connection string from a named environment variable with `--connection-env`.
+- Release artifacts are split into core and full variants; the full variant adds database connectors.
+- Detector plugin schema version 1 is identified by `schema_version = 1`.
+- Result schema version 1 records tool version, target kind, completeness status, source errors, truncation, and observed omitted matches.
+- File-count, total-byte, depth, extraction, response, and finding budgets bound untrusted input work.
+
+### Changed
+
+- Successful scans now return `0` when no findings are reported and `1` when findings are reported. Invocation or configuration errors return `2`; incomplete scans return `3`.
+- JSON and CSV sent to standard output no longer include status, progress, or diagnostic text.
+- Machine-readable output uses schema version 1, with a legacy output mode for migration.
+- Database scanning is limited to PostgreSQL and MongoDB.
+- Version 0.5 single-pattern detector schemas, plugin directories, and ordinary `.toml` filenames remain available through a warning-emitting compatibility bridge in 0.6; new files use `.detector.toml`.
+- Documentation and examples have been reorganised around the 0.6 interface.
+- HTTP redirects are limited to the original origin, and API responses must be successful UTF-8 bodies within the configured byte limit.
+- Database connectors now build independently through `postgres` and `mongodb`; `database` remains their combined feature.
+- Directory discovery is deterministic under file and byte limits, with memory proportional to the configured file count rather than the whole tree.
+
+### Fixed
+
+- Masking is UTF-8 safe, and one-character email local parts are no longer disclosed.
+- The legacy plugin bridge preserves line scope, byte-length checks, allowed characters, and legacy checksum semantics instead of silently translating or dropping them.
+- File, request-body, and document reads validate one opened handle, refuse final-component symlinks where the platform supports it, and enforce byte limits while reading.
+- Built-in detectors apply confidence thresholds before bounded retention and stop after the first proven overflow.
+- Detector byte spans and line and Unicode-column positions are consistent across CRLF and multilingual input.
+- PostgreSQL identifier quoting is schema-qualified and selected values are cast to `TEXT`; decode errors are no longer treated as empty cells.
+- MongoDB scans nested objects and arrays with a nesting limit and covers supported scalar values.
+- CSV neutralises spreadsheet formulas, HTML escapes source metadata, terminal diagnostics escape control characters, and report files are no-clobber by default with mode `0600` on Unix.
+- Danish CPR, Swedish personnummer, French NIR, and Italian Codice Fiscale detectors now apply stricter component, date, and check-character validation.
 
 ## [0.5.3] - 2026-04-24
 
 ### Security
 
-- Resolved 10 RUSTSEC advisories surfaced by `cargo audit`:
-  - `aws-lc-sys` (RUSTSEC-2026-0044, -0045, -0046, -0047, -0048)
-  - `rustls-webpki` (RUSTSEC-2026-0049, -0098, -0099, -0104)
-  - `quinn-proto` RUSTSEC-2026-0037 (DoS)
-  - `bytes` RUSTSEC-2026-0007 (`BytesMut::reserve` integer overflow)
-- Refreshed transitive dependencies via `cargo update` so the lockfile no longer pulls affected versions
+- Resolved `RUSTSEC-2026-0044`, `RUSTSEC-2026-0045`, `RUSTSEC-2026-0046`, `RUSTSEC-2026-0047`, and `RUSTSEC-2026-0048` in `aws-lc-sys`.
+- Resolved `RUSTSEC-2026-0049`, `RUSTSEC-2026-0098`, `RUSTSEC-2026-0099`, and `RUSTSEC-2026-0104` in `rustls-webpki`.
+- Resolved the `quinn-proto` denial-of-service advisory `RUSTSEC-2026-0037`.
+- Resolved the `bytes` integer-overflow advisory `RUSTSEC-2026-0007`.
+- Refreshed affected transitive dependencies.
 
 ### Fixed
 
-- Cleared two `clippy::collapsible_match` errors in `src/database/mongodb.rs` that were breaking the `Lint` and `Validate` CI jobs on Rust 1.95
-- CI and Release workflows now pass end-to-end again
+- Fixed two `collapsible_match` Clippy errors in the MongoDB integration with Rust 1.95 so CI and release builds pass.
 
 ## [0.5.2] - 2026-04-20
 
-### Fixed
+### Changed
 
-- Refreshed `Cargo.lock` after the upstream dependency consolidation merged into `main`
-- Aligned the committed lockfile with the published release so binary builds stay reproducible
+- Refreshed `Cargo.lock` after dependency consolidation to restore reproducible locked builds.
 
 ## [0.5.1] - 2026-04-20
 
 ### Added
 
-- Added `SECURITY.md` with a private vulnerability reporting path
-- Added `CODE_OF_CONDUCT.md`
-- Added GitHub issue templates and a pull request template
-- Added `rust-toolchain.toml` to pin the default toolchain and components
-- Added a tag-driven GitHub Actions release workflow for validation, packaging, and GitHub Releases
+- Added a security policy, code of conduct, issue templates, pull request template, pinned Rust toolchain, release workflow, and committed lockfile.
 
 ### Changed
 
-- Committed `Cargo.lock` for reproducible binary builds
-- Consolidated long-lived project docs under `docs/`
-- Clarified release metadata and repository structure for contributors
-
-### Fixed
-
-- Added the missing annotated `v0.4.0` tag for the original release commit
-- Removed stale scratch and snapshot markdown files from the repository root
-- Deleted the already-merged `feature/database-plugin-system` branch
-- Corrected release-facing docs to match the current repository layout
+- Consolidated project documentation, restored the missing 0.4 release tag, removed stale documentation, and merged the outstanding development branch.
 
 ## [0.5.0] - 2026-01-28
 
-### 🔒 Security (BREAKING CHANGES)
+### Security
 
-- **BREAKING**: Removed MySQL/MariaDB database scanning support
-  - Reason: Eliminates RUSTSEC-2023-0071 (rsa crate Marvin Attack vulnerability)
-  - No fix available from upstream maintainers
-  - Migration paths: PostgreSQL (recommended) or MongoDB
-  - See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) for detailed migration instructions
-  
-- Fixed RUSTSEC-2024-0363 (sqlx binary protocol vulnerability)
-- Fixed RUSTSEC-2024-0421 (idna Punycode labels vulnerability)
-- **Zero security vulnerabilities** (verified with `cargo audit`)
-
-### ✨ Added
-
-- SQLite support added to `DatabaseType` enum (implementation pending a future release)
-- Migration guide for MySQL → PostgreSQL/MongoDB transitions
-
-### 🐛 Fixed
-
-- Re-enabled XLSX extraction by updating `zip` crate to 4.2
-  - Resolves compatibility with `calamine 0.32`
-  - All Excel formats working: .xlsx, .xlsm, .xlsb, .xls
-- Resolved all 11 clippy linter warnings across 8 files
-  - Refactored functions with excessive parameters using structs (`CliOverrides`, `DbScanParams`)
-  - Replaced manual modulo checks with `.is_multiple_of()` method
-  - Fixed redundant closures and needless borrows
-- Updated MongoDB driver for 3.x fluent API syntax
-
-### ⬆️ Dependencies
-
-- **sqlx**: 0.7.4 → 0.8.6 (security fixes)
-- **mongodb**: 2.8.2 → 3.5.0 (security + API improvements)
-- **reqwest**: 0.12.28 → 0.13.1
-- **toml**: 0.8.23 → 0.9.11
-- **dirs**: 5.0.1 → 6.0.0
-- **zip**: 0.6 → 4.2 (re-enabled XLSX)
-
-### 💔 Breaking Changes
-
-**MySQL/MariaDB Removal:**
-- CLI flag `--db-type mysql` no longer accepted
-- Connection strings starting with `mysql://` not supported
-- Affected users: See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)
-
-**Recommended alternatives:**
-- **PostgreSQL**: Most SQL-compatible, recommended for relational data
-- **MongoDB**: NoSQL alternative for flexible schema requirements
-
-### 📝 Documentation
-
-- Confirmed CSV reporter is feature-complete
-- Updated all code examples to remove MySQL references
-
-## [0.4.0] - 2026-01-28
-
-### 🐛 Bug Fixes (2026-01-28)
-- **XLSX Extraction Re-enabled**: Fixed dependency conflict by updating `zip` crate from 0.6 to 4.2
-  - Resolves compatibility issue between `calamine 0.32` and `zip` crate
-  - All XLSX formats now working: .xlsx, .xlsm, .xlsb, .xls
-- **Code Quality**: Resolved all clippy linter warnings
-  - Replaced manual modulo checks with `is_multiple_of()` method
-  - Refactored functions with too many arguments using parameter structs
-  - Fixed redundant closures and needless borrows
-  - Updated benchmarks to use `std::hint::black_box` instead of deprecated `criterion::black_box`
-- **CSV Reporter**: Confirmed fully functional (was incorrectly marked as incomplete)
-
-### 🚀 Major Features
-
-#### Database Scanning
-- **PostgreSQL, MySQL, MongoDB Support**: Scan databases directly for PII
-  - New `scan-db` command with connection string support
-  - Table/collection filtering with regex patterns
-  - Column filtering and exclusion
-  - Row sampling for large datasets (PostgreSQL TABLESAMPLE)
-  - Connection pooling (default 4 connections)
-  - Async operations with tokio
-  - Progress bars for database scans
-  - ~1,200 lines of code for database module
-
-#### Plugin System for Custom Detectors
-- **TOML-based Plugin Configuration**: Create custom PII detectors without code
-  - Load plugins from `.detector.toml` files
-  - Regex pattern matching with confidence levels
-  - Built-in validation: Luhn, mod11, IBAN checksums
-  - Context keywords for confidence boosting
-  - Configurable severity levels
-  - Example plugins: employee IDs, patient IDs, custom formats
-  - ~560 lines of code for plugin system
-
-#### API Endpoint Scanning
-- **Scan REST APIs for PII**: Test API responses for PII exposure
-  - New `api` command for scanning HTTP endpoints
-  - Support for GET, POST, PUT, PATCH, DELETE
-  - Custom headers and request bodies
-  - Configurable timeouts and redirect handling
-  - Batch scanning of multiple endpoints
-  - ~300 lines of code for API scanner
-
-#### Enhanced API Key Detection
-- **Entropy-based Secret Detection**: Advanced API key and secret scanning
-  - AWS keys (AKIA...), GitHub tokens (ghp_, ghs_, gho_)
-  - Stripe keys (sk_live_, pk_live_, rk_live_)
-  - OpenAI keys (sk-...), Slack tokens (xox...)
-  - Google API keys (AIza...), JWT tokens
-  - Private keys (RSA/DSA/EC PEM format)
-  - Generic high-entropy secrets (Base64/Hex patterns)
-  - Shannon entropy calculation
-  - Context-aware confidence scoring
-  - ~380 lines of enhanced detection code
+- Removed MySQL and MariaDB support because their dependency path included `rsa` advisory `RUSTSEC-2023-0071` with no upstream fix. PostgreSQL and MongoDB remained available.
+- Resolved `RUSTSEC-2024-0363` in `sqlx` and `RUSTSEC-2024-0421` in `idna`.
 
 ### Added
 
-#### 5 New Countries
-- **Poland (PESEL)**, **Denmark (CPR)**, **Sweden (Personnummer)**, **Norway (Fødselsnummer)**, **Finland (HETU)**
-- Total: **12 countries supported** (BE, DE, DK, ES, FI, FR, GB, IT, NL, NO, PL, PT, SE)
+- Re-enabled XLSX extraction with `zip` 4.2 and `calamine` 0.32, including `.xlsx`, `.xlsm`, `.xlsb`, and `.xls` formats.
+- Added a SQLite database enum variant; the scanner implementation remained pending.
 
-#### Configuration File Support
-- TOML-based configuration with environment variable expansion
-- Load settings from `~/.pii-radar/config.toml` or custom path with `--config`
-- Configuration precedence: CLI args > config file > defaults
-- Environment variable substitution with `${VAR_NAME}` syntax
-- Example config file in `examples/config.toml`
-- 6 tests for configuration module
+### Changed
 
-#### Performance Benchmarks
-- Comprehensive Criterion.rs benchmark suite
-- Plain text scanning benchmarks
-- Individual detector performance tests
-- PII density scenarios (0%, 1%, 5%, 10%)
-- File size distribution tests (1KB to 1MB)
-- Pattern complexity benchmarks
-- Thread scaling tests (1 to 32 threads)
+- Updated `sqlx` to 0.8.6, `mongodb` to 3.5.0, `reqwest` to 0.13.1, `toml` to 0.9.11, `dirs` to 6, and `zip` to 4.2.
+- Adapted to the MongoDB 3.x API, grouped long function parameters into structs, adopted `is_multiple_of`, and resolved Clippy findings.
 
-### Improved
-- **Test Coverage**: 287 tests passing (from 199 in v0.3.0) - **+88 tests (+44%)**
-- **Total Detectors**: 16+ detectors across 12 countries
-- **Code Quality**: Zero warnings in release build
-- **Modular Architecture**: Better separation of concerns
-- **Error Handling**: Improved validation and error messages
-- **Document Extraction**: XLSX extraction re-enabled with zip 4.2 compatibility
+## [0.4.0] - 2026-01-28
+
+### Added
+
+- Added database scanning for PostgreSQL, MySQL, and MongoDB with include and exclude filters, sampling, connection pooling, asynchronous execution, and progress reporting. MySQL was removed in 0.5.0.
+- Added TOML detector plugins using `.detector.toml` files with patterns, confidence, validation, context keywords, severity, and examples.
+- Added API scanning for GET, POST, PUT, PATCH, and DELETE requests, with headers, request bodies, timeouts, redirects, and multiple endpoints.
+- Added API key and secret detection for AWS, GitHub, Stripe, OpenAI, Slack, Google, JWTs, private keys, and high-entropy values.
+- Added detectors for Polish PESEL, Danish CPR, Swedish personnummer, Norwegian fødselsnummer, and Finnish HETU.
+- Their validators added jurisdiction-specific date, format, and checksum rules, including dual modulus-11 checks for Norwegian numbers and modulus-31 control characters for Finnish HETU.
+- Added configuration files, environment-variable expansion, precedence rules, and an example configuration.
+- Added benchmarks for plain text, individual detectors, PII density, file sizes, pattern complexity, and thread scaling.
+- Added an optional database feature.
+- Re-enabled XLSX extraction.
+
+### Changed
+
+- Updated database dependencies to `sqlx` 0.7, `mongodb` 2.8, `tokio` 1.35, and `futures` 0.3.
+- Updated plugin dependencies to `toml` 0.8 and `dirs` 5, API dependencies to `reqwest` 0.12 and `url` 2.5, and document dependencies to `calamine` 0.32 and `zip` 4.2.
+- Updated benchmarks to use `std::hint::black_box`, refined validation and diagnostics, and separated the database, plugin, and API modules.
 
 ### Fixed
-- **XLSX Extraction Re-enabled**: Resolved dependency conflict
-  - Updated `zip` dependency from 0.6 to 4.2 (compatible with calamine 0.32)
-  - Re-enabled `calamine = "0.32"` for Excel file support
-  - Full support for .xlsx, .xlsm, .xlsb, .xls formats
-  - Resolved `lzma-rust2`/`crc` conflict by using zip 4.2 instead of 7.2
-  - All document extractors (PDF, DOCX, XLSX) now fully functional
 
-### Technical Details
-- **Tests**: 287 passing (95% test coverage)
-- **Detectors**: 16+ across 12 countries
-- **Lines Added**: ~3,500+ lines of production code
-- **New Dependencies**: 
-  - Database: `sqlx` (0.7), `mongodb` (2.8), `tokio` (1.35), `futures` (0.3)
-  - Plugin: `toml` (0.8), `dirs` (5.0)
-  - API: `reqwest` (0.12), `url` (2.5)
-  - Benchmarks: `criterion` (0.8)
-  - Documents: `calamine` (0.32), `zip` (4.2)
-- **Feature Flags**: `database` feature for optional database support
-
-### Detectors Added
-1. **Poland PESEL** - Polish national identification number (11 digits)
-   - Weighted checksum validation (weights: 1,3,7,9,1,3,7,9,1,3)
-   - Birth date encoding with century support (1800s-2200s)
-   - Gender detection from sequence number
-   - 9 comprehensive tests
-
-2. **Denmark CPR** - Danish Civil Registration number (10 digits, DDMMYY-SSSS format)
-   - Modulus 11 validation with weights [4,3,2,7,6,5,4,3,2,1]
-   - Date validation for DDMMYY format
-   - Dash normalization support
-   - 5 comprehensive tests
-
-3. **Sweden Personnummer** - Swedish personal identity number (10 or 12 digits)
-   - Luhn algorithm validation (Swedish variant: double positions 0,2,4,...)
-   - Supports both YYMMDD-XXXX and YYYYMMDD-XXXX formats
-   - Century marker support (+, -, A-Y)
-   - 5 comprehensive tests
-
-4. **Norway Fødselsnummer** - Norwegian birth number (11 digits)
-   - Dual modulus 11 checksum validation (K1 and K2)
-   - K1 weights: [3,7,6,1,8,9,4,5,2], K2 weights: [5,4,3,2,7,6,5,4,3,2]
-   - D-number support (day > 40 for immigrants)
-   - 5 comprehensive tests
-
-5. **Finland HETU** - Finnish personal identity code (11 characters)
-   - Modulus 31 checksum with 31-character lookup table
-   - Century markers: + (1800s), - (1900s), A-Y (2000s-2800s)
-   - Format: DDMMYY{century}XXX{check}
-   - Check characters: 0-9, A-Y (excluding G, I, O, V)
-   - 6 comprehensive tests
-
-### Configuration Features
-- **Scan Settings**: paths, max_depth, follow_symlinks, parallel scanning
-- **Output Settings**: format (json/terminal/html/csv), output_file, verbosity
-- **Filter Settings**: file size limits, extensions, excluded patterns, min_confidence
-- **Database Config**: connection strings, batch size, table/column filtering
-- **API Config**: endpoints, methods, headers, authentication
-- **Plugin Config**: plugin directory path for custom detectors
+- Resolved the XLSX dependency conflict and restored PDF, DOCX, XLSX, XLSM, XLSB, and XLS extraction.
+- Confirmed CSV reporting was functional after it had been described as incomplete.
+- Corrected redundant closures, needless borrows, manual modulo checks, and overlong function parameter lists.
 
 ## [0.3.0] - 2026-01-27
 
 ### Added
-- **3 New Countries**: France (NIR), Germany (Steuer-ID), Italy (Codice Fiscale)
-- **Document Extraction**: PDF, DOCX, XLSX support with `--extract-documents` flag
-- **HTML Reporter**: Interactive reports with search and visual statistics
-- **Progress Bar**: Real-time scanning progress with live match counts using `indicatif`
-- **Confidence Filtering**: `--min-confidence` flag (low/medium/high) for filtering results
-- **Extraction Statistics**: Track extracted documents and failures in scan results
-- **No Progress Flag**: `--no-progress` to disable progress bar for CI/CD pipelines
 
-### Improved
-- Enhanced terminal output with extraction statistics display
-- Better validation for all detectors with comprehensive test coverage
-- Thread-safe statistics tracking using atomic counters
-- More detailed scan results with document extraction metrics
+- Added detectors for French NIR, German Steuer-ID, and Italian Codice Fiscale.
+- Added optional PDF, DOCX, and XLSX text extraction.
+- Added HTML reports, progress reporting, confidence levels, extraction metrics, and `--no-progress`.
 
-### Technical Details
-- 199 tests passing (88% test coverage)
-- 11 detectors across 7 countries
-- ~1,500 lines of code added
-- New dependencies: `indicatif` (0.17), `tera` (1.19), `chrono` (0.4)
-- Existing dependencies: `calamine` (0.24) for XLSX extraction
+### Changed
 
-### Detectors Added
-1. **France NIR** - French social security number (15 digits)
-   - Luhn mod 97 validation
-   - Format: Sex + YY + MM + Dept + Commune + Order + Checksum
-   - 10 comprehensive tests
+- Improved terminal extraction statistics and validation behaviour, and made scan statistics thread-safe.
+- Updated `indicatif` to 0.17, `tera` to 1.19, and used `calamine` 0.24 for XLSX extraction.
 
-2. **Germany Steuer-ID** - German tax identification number (11 digits)
-   - Modified modulus 11 validation
-   - Complex digit repetition rules
-   - 12 comprehensive tests
+### Fixed
 
-3. **Italy Codice Fiscale** - Italian tax code (16 alphanumeric)
-   - Complex check digit algorithm with odd/even character lookup tables
-   - Month codes (A-T), day validation (01-31 male, 41-71 female)
-   - 15 comprehensive tests
-
-### Bug Fixes
-- Fixed test fixtures across JSON and terminal reporters for extraction stats
-- Updated `ScanResults` struct to include extraction metrics
+- Updated JSON and terminal reporter fixtures for extraction statistics.
 
 ## [0.2.0] - 2024-01-15
 
 ### Added
-- **3 New Countries**: United Kingdom (NHS), Belgium (RRN), Spain (DNI/NIE)
-- **Country Filtering**: `--countries` flag to filter detectors by country codes
-- **Confidence Levels**: Added confidence scoring to all detectors
-- **GDPR Article 9**: Context-aware detection for special category data
 
-### Improved
-- Enhanced validator algorithms with checksum validation
-- Better error messages and user feedback
-- Performance optimizations for parallel scanning
+- Added detectors for UK NHS numbers, Belgian RRN, and Spanish DNI and NIE.
+- Added country filtering, confidence levels, and context analysis.
 
-### Technical Details
-- 163 tests passing
-- 9 detectors across 5 countries
-- Country codes supported: BE, GB, ES, NL
+### Changed
+
+- Improved validation, diagnostics, and parallel scanning behaviour.
 
 ## [0.1.0] - 2024-01-01
 
 ### Added
-- Initial release
-- **2 Countries**: Netherlands (BSN), Pan-European (IBAN)
-- **Universal Detectors**: Credit Cards, Email Addresses
-- **Core Features**:
-  - Parallel file scanning with Rayon
-  - JSON and terminal output formats
-  - `.pii-ignore` file support
-  - GDPR context analysis
-  - Thread control with `-j` flag
-  - File size limits with `--max-filesize`
 
-### Technical Details
-- 120 tests passing
-- 4 detectors (BSN, IBAN, Credit Card, Email)
-- Built with Rust 1.70+
+- Initial detectors for Dutch BSN, IBAN, payment-card numbers, and email addresses.
+- Added parallel directory scanning, terminal and JSON output, `.pii-ignore`, context analysis, thread controls, and file-size limits.
 
----
-
+[0.5.3]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.2...v0.5.3
+[Unreleased]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.3...v0.6.0
+[0.5.2]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/silv3rshi3ld/gdpr-pii-scanner/releases/tag/v0.1.0

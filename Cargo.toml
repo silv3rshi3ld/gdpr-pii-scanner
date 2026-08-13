@@ -1,14 +1,19 @@
 [package]
 name = "pii-radar"
-version = "0.5.3"
+version = "0.6.0"
 edition = "2021"
+rust-version = "1.88"
 authors = ["PII-Radar Contributors"]
 license = "MIT OR Apache-2.0"
-description = "High-performance GDPR-compliant PII scanner for European countries - detects BSN, IBAN, NIR, Codice Fiscale, and more"
+description = "PII and secret scanner for files, HTTP responses, PostgreSQL, and MongoDB"
 repository = "https://github.com/silv3rshi3ld/gdpr-pii-scanner"
 readme = "README.md"
 keywords = ["pii", "security", "privacy", "scanner", "gdpr"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["Cargo.toml.orig"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 # CLI & Argument Parsing
@@ -18,17 +23,15 @@ indicatif = "0.18"
 
 # Concurrency & Performance
 rayon = "1.10"
-crossbeam = "0.8"
 num_cpus = "1.16"
 
 # Regex & Pattern Matching
 regex = "1.10"
-fancy-regex = "0.17"
 once_cell = "1.19"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 # File System
 ignore = "0.4"
-walkdir = "2.5"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -36,38 +39,25 @@ serde_json = "1.0"
 csv = "1.3"
 toml = "1.1"
 
-# Templating & Time
-tera = "1.19"
-chrono = "0.4"
-
 # Error Handling
 anyhow = "1.0"
 thiserror = "2.0"
 
 # Document Extraction
-lopdf = "0.40"              # PDF text extraction
+lopdf = "0.44"              # PDF text extraction
 zip = "8.5"                 # DOCX and XLSX support
-quick-xml = "0.39"          # XML parsing for DOCX
-calamine = "0.34"           # Excel/XLSX parsing
-encoding_rs = "0.8"         # Character encoding detection
+quick-xml = "0.41"          # XML parsing for DOCX
+calamine = "0.36.1"         # Excel/XLSX parsing
 
-# Crypto/Hashing (voor validatie)
-sha2 = "0.11"
-base64 = "0.22"
-
-# Entropy berekening
+# Entropy calculation
 ordered-float = "5.1"
 
 # Database connectivity (optional feature for database scanning)
 # Note: MySQL support removed to eliminate rsa crate vulnerability (RUSTSEC-2023-0071)
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "sqlite"], optional = true }
-mongodb = { version = "3.5", optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"], optional = true }
+mongodb = { version = "3.8", optional = true }
 tokio = { version = "1.35", features = ["full"], optional = true }
 futures = { version = "0.3", optional = true }
-
-# Logging
-log = "0.4"
-env_logger = "0.11"
 
 # Directories
 dirs = "6.0"
@@ -75,15 +65,22 @@ dirs = "6.0"
 # HTTP Client for API scanning
 reqwest = { version = "0.13", features = ["blocking", "json"] }
 url = "2.5"
+tempfile = "3.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 default = []
-database = ["sqlx", "mongodb", "tokio", "futures"]
+postgres = ["dep:sqlx", "dep:tokio", "dep:futures"]
+mongodb = ["dep:mongodb", "dep:tokio", "dep:futures"]
+database = ["postgres", "mongodb"]
 
 [dev-dependencies]
 criterion = "0.8"
-tempfile = "3.10"
 pretty_assertions = "1.4"
+assert_cmd = "2.0"
+predicates = "3.1"
 
 [[bench]]
 name = "scan_benchmark"
@@ -96,4 +93,4 @@ codegen-units = 1
 strip = true
 
 [profile.dev]
-opt-level = 1  # Snellere development builds
+opt-level = 1  # Faster local development builds
