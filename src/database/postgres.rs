@@ -192,7 +192,7 @@ impl PostgresScanner {
         let query = build_select_query(schema, table, &columns, options)?;
 
         // Execute query and scan rows
-        let mut rows = sqlx::query(&query).fetch(&self.pool);
+        let mut rows = sqlx::query(sqlx::AssertSqlSafe(query)).fetch(&self.pool);
         let mut row_count = 0;
 
         'rows: while let Some(row_result) = rows.next().await {
